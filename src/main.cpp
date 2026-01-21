@@ -1,71 +1,78 @@
 #include <Arduino.h>
 #include "storage/StorageManager.h"
 #include "connection/ConnectionManager.h"
+#include "diagnostics/DiagnosticEngine.h"
 
-enum DeviceState { TRY_CONNECT, CAPTIVE_PORTAL, DIAGNOSTICS, SHUTDOWN };
-DeviceState currentState;
-unsigned long portalStartTime = 0;
-const unsigned long PORTAL_TIMEOUT = 5 * 60 * 1000;
-
-void setup() {
-    Serial.begin(115200);
-    while (!Serial) { delay(10); } 
-    delay(2000); 
-
-    Serial.println("\n--- Probe Startup ---");
-    StorageManager::begin();
-    ConnectionManager::begin();
-
-    int count = StorageManager::getRebootCount();
-    if (count >= 2) {
-        currentState = SHUTDOWN;
-    } else {
-        currentState = TRY_CONNECT;
+// Helper to convert the rating enum to a string for the logs
+String getRatingString(CongestionRating r) {
+    switch(r) {
+        case GOOD: return "GOOD";
+        case BAD: return "BAD";
+        case TERRIBLE: return "TERRIBLE";
+        default: return "UNKNOWN";
     }
 }
 
-void loop() {
-    switch (currentState) {
-        case TRY_CONNECT: {
-            WifiCredentials creds = StorageManager::loadWifiCredentials();
-            Serial.printf("Searching for stored credentials... (%s)\n", creds.ssid.c_str());
+void setup() {
+    Serial.begin(115200);
+    while (!Serial) { delay(10); } // Wait for terminal
+    delay(2000);
 
-            if (ConnectionManager::tryConnect(creds.ssid, creds.password)) {
-                Serial.println("Connection Successful!");
-                currentState = DIAGNOSTICS;
-                StorageManager::setRebootCount(0); // Success, so reset the fail counter
-            } else {
-                Serial.println("Connection Failed. Opening Portal...");
-                currentState = CAPTIVE_PORTAL;
-                portalStartTime = millis();
-                ConnectionManager::startCaptivePortal();
-            }
-            break;
-        }
+    Serial.println("\n--- Starting Diagnostic Verification Test ---");
 
-        case DIAGNOSTICS: {
-            static unsigned long lastTest = 0;
-            if (millis() - lastTest > 5000) {
-                Serial.println("[DIAG] Performing Network Tests...");
-                // Check if we lost connection
-                if (!ConnectionManager::isConnected()) {
-                    Serial.println("[DIAG] Connection lost! Reverting to TRY_CONNECT");
-                    currentState = TRY_CONNECT;
-                }
-                lastTest = millis();
-            }
-            break;
-        }
+    // 1. Initialize Modules
+    StorageManager::begin();
+    ConnectionManager::begin();
 
-        case CAPTIVE_PORTAL: {
-            ConnectionManager::handlePortal();
-            // ... (rest of your portal timeout logic)
-            break;
-        }
-
-        case SHUTDOWN:
-            Serial.println("Powering down to preserve state.");
-            ESP.deepSleep(0);
-            break;
+    // 2. Load Stored Credentials
+    WifiCredentials creds = StorageManager::loadWifiCredentials();
+    
+    if (creds.ssid == "") {
+        Serial.println("[ERROR] No credentials found in storage. Run Captive Portal first.");
+        return;
     }
+
+    // 3. Attempt Connection
+    Serial.printf("Attempting to connect to: %s\n", creds.ssid.c_str());
+    if (ConnectionManager::tryConnect(creds.ssid, creds.password)) {
+        
+        // --- TEST 1: LIGHT DIAGNOSTICS ---
+        Serial.println("\n[1/2] RUNNING LIGHT DIAGNOSTICS...");
+        NetworkMetrics lightResults = DiagnosticEngine::performFullTest("8.8.8.8");
+        
+        Serial.println("---------- LIGHT RESULTS ----------");
+        Serial.printf("RSSI: %d dBm | BSSID: %s | Channel: %d\n", 
+                      lightResults.rssi, lightResults.bssid.c_str(), lightResults.channel);
+        Serial.printf("Latency: %d ms | DNS: %d ms | Loss: %.1f%%\n", 
+                      lightResults.avgLatency, lightResults.dnsResolutionTime, lightResults.packetLoss);
+        Serial.printf("Congestion: %s (%d neighbors)\n", 
+                      getRatingString(lightResults.congestion).c_str(), lightResults.neighborCount);
+        Serial.println("-----------------------------------\n");
+
+        delay(2000); // Brief pause between tests
+
+        // --- TEST 2: ENHANCED (DEEP) DIAGNOSTICS ---
+        Serial.println("[2/2] RUNNING ENHANCED (DEEP) DIAGNOSTICS...");
+        // Note: This may involve temporary disconnection for radio analysis
+        EnhancedMetrics deepResults = DiagnosticEngine::performDeepAnalysis("8.8.8.8");
+
+        Serial.println("---------- DEEP RESULTS ----------");
+        Serial.printf("Link Quality Score: %.1f / 100\n", deepResults.linkQuality);
+        Serial.printf("SNR: %.1f dB | Noise Floor: %d dBm\n", deepResults.snr, deepResults.noiseFloor);
+        Serial.printf("PHY Mode: %s | Estimated Throughput: %d kbps\n", 
+                      deepResults.phyMode.c_str(), deepResults.tcpThroughput);
+        Serial.printf("Channel Utilization: %.1f%%\n", deepResults.channelUtilization);
+        Serial.printf("Probe Uptime: %u seconds\n", deepResults.uptime);
+        Serial.println("----------------------------------");
+
+    } else {
+        Serial.println("[ERROR] Connection failed. Check AP availability.");
+    }
+
+    Serial.println("\n--- Test Sequence Complete ---");
+}
+
+void loop() {
+    // Stay idle after test
+    delay(1000);
 }
