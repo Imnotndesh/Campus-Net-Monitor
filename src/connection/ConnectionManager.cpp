@@ -58,28 +58,80 @@ void ConnectionManager::handlePortal() {
 }
 
 void ConnectionManager::handleRoot() {
-    String html = "<h1>Campus Probe Setup</h1>";
+    String html = "<html><head><title>Probe Setup</title>";
+    html += "<style>body{font-family:sans-serif; padding:20px;} input{margin-bottom:10px; width:100%;}</style></head>";
+    html += "<body><h1>Campus Probe Setup</h1>";
     html += "<form action='/save' method='POST'>";
-    html += "SSID: <input type='text' name='ssid'><br>";
-    html += "Password: <input type='password' name='pass'><br>";
-    html += "<input type='submit' value='Save & Reboot'>";
-    html += "</form>";
+    
+    html += "<h3>Network Settings</h3>";
+    html += "SSID: <input type='text' name='ssid' placeholder='WiFi Name'><br>";
+    html += "Password: <input type='password' name='pass' placeholder='WiFi Password'><br>";
+    
+    html += "<h3>Reporting Settings</h3>";
+    html += "MQTT Server IP: <input type='text' name='mqtt_srv' value='192.168.100.27'><br>";
+    html += "MQTT Port: <input type='number' name='mqtt_port' value='1883'><br>";
+    html += "Probe ID: <input type='text' name='probe_id' value='SEC-05-ECA'><br>";
+    
+    html += "<input type='submit' value='Save & Commission Probe' style='background:#007bff; color:white; padding:10px; border:none; cursor:pointer;'>";
+    html += "</form></body></html>";
+    
     server.send(200, "text/html", html);
 }
 
 void ConnectionManager::handleSave() {
+    // The names here must match the <input name='...'> in handleRoot
     String ssid = server.arg("ssid");
     String pass = server.arg("pass");
+    String mqttSrv = server.arg("mqtt_srv");
+    int mqttPort = server.arg("mqtt_port").toInt();
 
-    if (ssid != "") {
+    if (ssid.length() > 0 && mqttSrv.length() > 0) {
+        // 1. Save WiFi
         StorageManager::saveWifiCredentials(ssid, pass);
-        StorageManager::setRebootCount(0); // Reset count as we have new data
-        server.send(200, "text/html", "Credentials Saved. Rebooting...");
+        
+        // 2. Save MQTT
+        SystemConfig cfg;
+        strncpy(cfg.mqttServer, mqttSrv.c_str(), 64);
+        cfg.mqttPort = mqttPort;
+        strncpy(cfg.telemetryTopic, "campus/probes/telemetry", 128);
+        strncpy(cfg.cmdTopic, "campus/probes/cmd", 128);
+        cfg.reportInterval = 30;
+        
+        ConfigManager::save(cfg);
+        StorageManager::setRebootCount(0);
+        server.send(200, "text/html", "<h1>Success</h1><p>Probe configured. Rebooting...</p>");
         delay(2000);
         ESP.restart();
+    } else {
+        server.send(400, "text/html", "Error: SSID and MQTT IP are required.");
     }
 }
 
 bool ConnectionManager::isConnected() {
     return WiFi.status() == WL_CONNECTED;
+}
+bool ConnectionManager::establishConnection(String ssid, String pass) {
+    int fails = StorageManager::getFailureCount();
+
+    if (fails >= MAX_FAILURES) {
+        Serial.println("[CONN] Critical Failure Threshold reached. Forcing Portal.");
+        startCaptivePortal();
+        return false; // Tells main we are now in Portal mode
+    }
+
+    if (tryConnect(ssid, pass)) {
+        StorageManager::resetFailureCount();
+        return true; // Connection successful
+    } else {
+        StorageManager::incrementFailureCount();
+        Serial.printf("[CONN] Connection failed. Attempt %d/%d\n", StorageManager::getFailureCount(), MAX_FAILURES);
+        
+        if (StorageManager::getFailureCount() >= MAX_FAILURES) {
+            startCaptivePortal();
+            return false;
+        }
+        
+        ESP.restart(); // Reboot to try again fresh
+        return false; 
+    }
 }

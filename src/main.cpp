@@ -1,78 +1,103 @@
 #include <Arduino.h>
 #include "storage/StorageManager.h"
+#include "storage/ConfigManager.h"
 #include "connection/ConnectionManager.h"
+#include "comms/MqttManager.h"
 #include "diagnostics/DiagnosticEngine.h"
+#include "packaging/JsonPackager.h"
+#include "actions/led/StatusLED.h"
+#include "actions/button/ButtonManager.h"
 
-// Helper to convert the rating enum to a string for the logs
-String getRatingString(CongestionRating r) {
-    switch(r) {
-        case GOOD: return "GOOD";
-        case BAD: return "BAD";
-        case TERRIBLE: return "TERRIBLE";
-        default: return "UNKNOWN";
+// System States
+enum SystemState { PORTAL, RUNNING };
+SystemState currentState;
+SystemConfig activeCfg;
+
+// Pin Definitions (Standard DevKit V1)
+const int LED_PIN = 2;
+const int BOOT_PIN = 0;
+void uiTask(void * pvParameters) {
+    for(;;) {
+        StatusLED::update();
+        ButtonManager::update();
+        vTaskDelay(20 / portTICK_PERIOD_MS); 
     }
 }
-
 void setup() {
     Serial.begin(115200);
-    while (!Serial) { delay(10); } // Wait for terminal
-    delay(2000);
+    delay(1000);
+    StatusLED::begin(LED_PIN);
+    ButtonManager::begin(BOOT_PIN);
+    StatusLED::setStatus(MODE_PORTAL);
 
-    Serial.println("\n--- Starting Diagnostic Verification Test ---");
-
-    // 1. Initialize Modules
+    // 2. Initialize Storage
     StorageManager::begin();
-    ConnectionManager::begin();
+    ConfigManager::begin();
 
-    // 2. Load Stored Credentials
+    xTaskCreatePinnedToCore(uiTask, "uiTask", 2048, NULL, 1, NULL, 0);
+    // 3. Load Credentials
     WifiCredentials creds = StorageManager::loadWifiCredentials();
     
-    if (creds.ssid == "") {
-        Serial.println("[ERROR] No credentials found in storage. Run Captive Portal first.");
-        return;
-    }
-
-    // 3. Attempt Connection
-    Serial.printf("Attempting to connect to: %s\n", creds.ssid.c_str());
-    if (ConnectionManager::tryConnect(creds.ssid, creds.password)) {
+    Serial.println("\n--- [Campus Monitor probe startup] ---");
+    
+    // 4. Unified Connection Logic
+    // This handles: Connection -> Retry Count -> Portal Trigger
+    if (ConnectionManager::establishConnection(creds.ssid, creds.password)) {
+        activeCfg = ConfigManager::load();
         
-        // --- TEST 1: LIGHT DIAGNOSTICS ---
-        Serial.println("\n[1/2] RUNNING LIGHT DIAGNOSTICS...");
-        NetworkMetrics lightResults = DiagnosticEngine::performFullTest("8.8.8.8");
+        // Setup MQTT with current config
+        MqttManager::setup(activeCfg.mqttServer, activeCfg.mqttPort, "PROBE-SEC-05");
         
-        Serial.println("---------- LIGHT RESULTS ----------");
-        Serial.printf("RSSI: %d dBm | BSSID: %s | Channel: %d\n", 
-                      lightResults.rssi, lightResults.bssid.c_str(), lightResults.channel);
-        Serial.printf("Latency: %d ms | DNS: %d ms | Loss: %.1f%%\n", 
-                      lightResults.avgLatency, lightResults.dnsResolutionTime, lightResults.packetLoss);
-        Serial.printf("Congestion: %s (%d neighbors)\n", 
-                      getRatingString(lightResults.congestion).c_str(), lightResults.neighborCount);
-        Serial.println("-----------------------------------\n");
-
-        delay(2000); // Brief pause between tests
-
-        // --- TEST 2: ENHANCED (DEEP) DIAGNOSTICS ---
-        Serial.println("[2/2] RUNNING ENHANCED (DEEP) DIAGNOSTICS...");
-        // Note: This may involve temporary disconnection for radio analysis
-        EnhancedMetrics deepResults = DiagnosticEngine::performDeepAnalysis("8.8.8.8");
-
-        Serial.println("---------- DEEP RESULTS ----------");
-        Serial.printf("Link Quality Score: %.1f / 100\n", deepResults.linkQuality);
-        Serial.printf("SNR: %.1f dB | Noise Floor: %d dBm\n", deepResults.snr, deepResults.noiseFloor);
-        Serial.printf("PHY Mode: %s | Estimated Throughput: %d kbps\n", 
-                      deepResults.phyMode.c_str(), deepResults.tcpThroughput);
-        Serial.printf("Channel Utilization: %.1f%%\n", deepResults.channelUtilization);
-        Serial.printf("Probe Uptime: %u seconds\n", deepResults.uptime);
-        Serial.println("----------------------------------");
-
+        Serial.println("[SYSTEM] Transitioning to RUNNING state.");
+        currentState = RUNNING;
     } else {
-        Serial.println("[ERROR] Connection failed. Check AP availability.");
+        Serial.println("[SYSTEM] Transitioning to PORTAL state.");
+        currentState = PORTAL;
     }
-
-    Serial.println("\n--- Test Sequence Complete ---");
 }
 
 void loop() {
-    // Stay idle after test
-    delay(1000);
+    if (currentState == PORTAL) {
+        StatusLED::setStatus(MODE_PORTAL); // 1 Slow Pulse
+        ConnectionManager::handlePortal();
+    } 
+    else {
+        // PRODUCTION MODE
+        if (ConnectionManager::isConnected()) {
+            MqttManager::loop();
+
+            // Update LED based on Comms Health
+            if (MqttManager::isConnected()) {
+                StatusLED::setStatus(STATUS_OK); // Solid Blue
+            } else {
+                StatusLED::setStatus(ERR_MQTT); // 5 Pulses (Bad IP/Port)
+            }
+
+            // Standard Telemetry Cycle
+            static unsigned long lastReport = 0;
+            if (millis() - lastReport > (activeCfg.reportInterval * 1000)) {
+                lastReport = millis();
+                
+                Serial.println("[DIAG] Running Telemetry Scan...");
+                NetworkMetrics m = DiagnosticEngine::performFullTest("8.8.8.8");
+                String payload = JsonPackager::serializeLight(m, "PROBE-SEC-05");
+                
+                if (MqttManager::publishTelemetry(payload)) {
+                    Serial.println("[MQTT] Published.");
+                } else {
+                    Serial.println("[MQTT] Buffer Saved.");
+                }
+            }
+        } 
+        else {
+            // WiFi Dropped
+            StatusLED::setStatus(ERR_WIFI); // 4 Pulses
+            
+            // Try to re-establish or fall back to portal
+            WifiCredentials creds = StorageManager::loadWifiCredentials();
+            if (!ConnectionManager::establishConnection(creds.ssid, creds.password)) {
+                currentState = PORTAL;
+            }
+        }
+    }
 }

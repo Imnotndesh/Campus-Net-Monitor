@@ -63,6 +63,8 @@ bool MqttManager::loop() {
     if (!client.connected()) reconnect();
     return client.loop();
 }
-
+bool MqttManager::isConnected(){
+    return client.connected();
+}
 bool MqttManager::isDeepScanRequested() { return _deepScanTriggered; }
 void MqttManager::clearDeepScanFlag() { _deepScanTriggered = false; }

@@ -13,6 +13,7 @@ public:
     static void syncOfflineLogs();
     static bool isDeepScanRequested();
     static void clearDeepScanFlag();
+    static bool isConnected();
 
 private:
     static void callback(char* topic, byte* payload, unsigned int length);
