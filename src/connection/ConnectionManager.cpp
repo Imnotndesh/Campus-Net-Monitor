@@ -98,7 +98,13 @@ void ConnectionManager::handleSave() {
         cfg.reportInterval = 30;
         
         ConfigManager::save(cfg);
+        
+        // 3. CRITICAL FIX: Reset failure counters when new credentials are saved
+        StorageManager::resetFailureCount();
         StorageManager::setRebootCount(0);
+        
+        Serial.println("[PORTAL] Credentials saved. Resetting failure counters.");
+        
         server.send(200, "text/html", "<h1>Success</h1><p>Probe configured. Rebooting...</p>");
         delay(2000);
         ESP.restart();
@@ -110,6 +116,7 @@ void ConnectionManager::handleSave() {
 bool ConnectionManager::isConnected() {
     return WiFi.status() == WL_CONNECTED;
 }
+
 bool ConnectionManager::establishConnection(String ssid, String pass) {
     int fails = StorageManager::getFailureCount();
 
