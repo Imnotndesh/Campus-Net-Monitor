@@ -5,6 +5,7 @@
 #include "comms/MqttManager.h"
 #include "diagnostics/DiagnosticEngine.h"
 #include "packaging/JsonPackager.h"
+#include "comms/CommandHandler.h"
 #include "packaging/TimeManager.h"
 #include "actions/led/StatusLED.h"
 #include "actions/button/ButtonManager.h"
@@ -21,7 +22,6 @@ void startPortalMode();
 void startRunningMode();
 void handleRunningState();
 void performTelemetry();
-void performDeepScan();
 
 void uiTask(void * pvParameters) {
     for(;;) {
@@ -63,6 +63,7 @@ void setupSystem() {
     ButtonManager::begin(BOOT_PIN);
     StorageManager::begin();
     ConfigManager::begin();
+    CommandHandler::begin();
     xTaskCreatePinnedToCore(uiTask, "uiTask", 2048, NULL, 1, NULL, 0);
 }
 
@@ -109,21 +110,16 @@ void handleRunningState() {
     }
 
     if (MqttManager::hasPendingCommand()) {
-         PendingCommand cmd = MqttManager::getNextCommand();
-         if (cmd.type == "deep_scan") {
-             performDeepScan();
-             MqttManager::clearCommand();
-         }
+            PendingCommand cmd = MqttManager::getNextCommand();
+            CommandHandler::process(cmd);
+            MqttManager::clearCommand();
     }
 }
 
 void performTelemetry() {
     Serial.println("\n[DIAG] ═══ Telemetry Cycle ═══");
     NetworkMetrics m = DiagnosticEngine::performFullTest("8.8.8.8");
-    
-    // Use the dynamic Probe ID
     String payload = JsonPackager::serializeLight(m, activeCfg.probe_id);
-    
     if (MqttManager::publishTelemetry(payload)) {
         Serial.println("[MQTT] ✓ Telemetry published");
     } else {
@@ -134,9 +130,8 @@ void performTelemetry() {
 void performDeepScan() {
     Serial.println("\n[DIAG] ═══ Deep Scan Requested ═══");
     MqttManager::publishCommandResult("deep_scan", "processing", "{\"msg\": \"Scan started\"}");
-
     EnhancedMetrics em = DiagnosticEngine::performDeepAnalysis("8.8.8.8");
     String payload = JsonPackager::serializeEnhanced(em, activeCfg.probe_id);
+    Serial.printf("[DIAG] Generated Payload Size: %d bytes\n", payload.length());
     MqttManager::publishCommandResult("deep_scan", "completed", payload);
-    Serial.println("[MQTT] ✓ Deep scan result published");
 }

@@ -1,4 +1,3 @@
-// src/comms/CommandHandler.h (Fixed)
 #ifndef COMMAND_HANDLER_H
 #define COMMAND_HANDLER_H
 
@@ -6,34 +5,26 @@
 #include <ArduinoJson.h>
 #include "../storage/ConfigManager.h"
 #include "../storage/StorageManager.h"
+#include "../diagnostics/DiagnosticEngine.h"
 #include "../firmware/OTAManager.h"
-
-enum CommandType {
-    CMD_DEEP_SCAN,
-    CMD_CONFIG_UPDATE,
-    CMD_RESTART,
-    CMD_OTA_UPDATE,
-    CMD_FACTORY_RESET,
-    CMD_PING,
-    CMD_GET_STATUS,
-    CMD_UNKNOWN
-};
+#include "../packaging/JsonPackager.h"
+#include "MqttManager.h"
 
 class CommandHandler {
 public:
     static void begin();
-    static void processCommand(String topic, String payload);
-    static void sendCommandResponse(String commandId, bool success, String message);
-    
+    static void process(PendingCommand cmd);
+
 private:
-    static CommandType parseCommandType(String type);
-    static void handleDeepScan(JsonObject& params);
-    static void handleConfigUpdate(JsonObject& params);
-    static void handleRestart(JsonObject& params);
-    static void handleOTAUpdate(JsonObject& params);
-    static void handleFactoryReset(JsonObject& params);
-    static void handlePing(JsonObject& params);
-    static void handleGetStatus(JsonObject& params);
+    static void handleDeepScan(String payload);
+    static void handleConfigUpdate(String payload);
+    static void handleRestart(String payload);
+    static void handleOTAUpdate(String payload);
+    static void handleFactoryReset(String payload);
+    static void handlePing(String payload);
+    static void handleGetStatus(String payload);
+    
+    static void sendCommandResponse(String commandType, bool success, String message);
 };
 
 #endif

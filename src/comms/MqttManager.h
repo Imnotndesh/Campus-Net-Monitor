@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include "../storage/StorageManager.h"
 
+// The struct main.cpp expects
 struct PendingCommand {
     String type;
     String payload;
@@ -17,15 +18,12 @@ public:
     static void setup(const char* broker, int port, String probeId);
     static bool loop();
     static bool publishTelemetry(String payload);
-    static bool publishResponse(String topic, String payload);
     static void publishCommandResult(String cmdType, String status, String resultJson);
     static void syncOfflineLogs();
     static bool isConnected();
     static bool hasPendingCommand();
     static PendingCommand getNextCommand();
     static void clearCommand();
-    static bool isDeepScanRequested();
-    static void clearDeepScanFlag();
 
 private:
     static void callback(char* topic, byte* payload, unsigned int length);
@@ -34,9 +32,7 @@ private:
     static WiFiClient espClient;
     static PubSubClient client;
     static String _probeId;
-
     static PendingCommand _currentCommand;
-    static bool _deepScanTriggered;
 };
 
 #endif
