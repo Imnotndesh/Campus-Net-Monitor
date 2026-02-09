@@ -1,6 +1,8 @@
 #include "ResultBuffer.h"
 
-DynamicJsonDocument ResultBuffer::buffer(8192);
+// 1. INCREASED SIZE: 8KB is too small for multiple deep scan records. 
+// Deep scans are complex objects. 16KB is safer.
+DynamicJsonDocument ResultBuffer::buffer(16384);
 bool ResultBuffer::initialized = false;
 
 void ResultBuffer::begin() {
@@ -12,7 +14,11 @@ void ResultBuffer::begin() {
     
     loadBuffer();
     initialized = true;
-    Serial.printf("[RBUF] Initialized with %d buffered results\n", getBufferCount());
+    
+    int count = getBufferCount();
+    if (count > 0) {
+        Serial.printf("[RBUF] Initialized with %d buffered results\n", count);
+    }
 }
 
 bool ResultBuffer::saveResult(String cmdType, String status, String resultJson) {
@@ -21,38 +27,34 @@ bool ResultBuffer::saveResult(String cmdType, String status, String resultJson) 
         return false;
     }
     
-    // Ensure we have the latest state
     loadBuffer();
-    
-    // Initialize array if missing
     if (!buffer.containsKey("results")) {
         buffer.createNestedArray("results");
     }
 
     JsonArray results = buffer["results"].as<JsonArray>();
-    
-    // Cap buffer size (FIFO)
     if (results.size() >= MAX_BUFFERED_RESULTS) {
         Serial.println("[RBUF] ⚠ Buffer full, removing oldest result");
         results.remove(0); 
     }
-    
-    // Add new result
     JsonObject newResult = results.createNestedObject();
     newResult["cmd"] = cmdType;
     newResult["status"] = status;
-    
-    // Use serialized to prevent double-escaping
-    newResult["result"] = serialized(resultJson.c_str());
     newResult["timestamp"] = millis();
+    DynamicJsonDocument tempDoc(4096);
+    DeserializationError err = deserializeJson(tempDoc, resultJson);
+
+    if (!err) {
+        newResult["result"] = tempDoc;
+    } else {
+        newResult["result"] = resultJson;
+    }
     
-    // Write to disk
     return saveBuffer();
 }
 
 bool ResultBuffer::hasBufferedResults() {
     if (!initialized) return false;
-    // Don't reload every time to avoid flash wear, rely on memory state
     if (!buffer.containsKey("results")) return false;
     return buffer["results"].as<JsonArray>().size() > 0;
 }
@@ -66,13 +68,15 @@ BufferedResult ResultBuffer::getNextResult() {
     
     res.cmdType = obj["cmd"].as<String>();
     res.status = obj["status"].as<String>();
-    
-    // Handle serialized data correctly
+    res.timestamp = obj["timestamp"];
+
+    // --- CRITICAL FIX START ---
+    // Since we saved it as a nested object, we must serialize it back to a string for MQTT.
+    // This perfectly reconstructs the JSON string that was missing before.
     String rawRes;
     serializeJson(obj["result"], rawRes);
     res.resultJson = rawRes;
-    
-    res.timestamp = obj["timestamp"];
+    // --- CRITICAL FIX END ---
     
     return res;
 }
@@ -98,7 +102,7 @@ void ResultBuffer::clearAll() {
     buffer.createNestedArray("results");
     saveBuffer();
     
-    Serial.println("[RBUF]  All buffered results cleared");
+    Serial.println("[RBUF] ✓ All buffered results cleared");
 }
 
 bool ResultBuffer::loadBuffer() {
