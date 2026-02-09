@@ -3,13 +3,14 @@
 #include "storage/ConfigManager.h"
 #include "connection/ConnectionManager.h"
 #include "comms/MqttManager.h"
+#include "comms/CommandHandler.h"
 #include "diagnostics/DiagnosticEngine.h"
 #include "packaging/JsonPackager.h"
-#include "comms/CommandHandler.h"
 #include "packaging/TimeManager.h"
 #include "actions/led/StatusLED.h"
 #include "actions/button/ButtonManager.h"
 
+// --- Global State ---
 enum SystemState { PORTAL, RUNNING };
 SystemState currentState;
 SystemConfig activeCfg;
@@ -35,6 +36,7 @@ void setup() {
     setupSystem();
     WifiCredentials creds = StorageManager::loadWifiCredentials();
     activeCfg = ConfigManager::load();
+
     Serial.println("[SYSTEM] Starting connection sequence...");
     if (ConnectionManager::establishConnection(creds.ssid, creds.password)) {
         startRunningMode();
@@ -51,6 +53,7 @@ void loop() {
         handleRunningState();
     }
 }
+
 void setupSystem() {
     Serial.begin(115200);
     delay(1000);
@@ -59,11 +62,17 @@ void setupSystem() {
     Serial.println("║   Campus Monitor Probe v1.0.0          ║");
     Serial.println("║   Network Diagnostic System            ║");
     Serial.println("╚════════════════════════════════════════╝\n");
+    
+    // Hardware Init
     StatusLED::begin(LED_PIN);
     ButtonManager::begin(BOOT_PIN);
+    
+    // Subsystem Init
     StorageManager::begin();
     ConfigManager::begin();
     CommandHandler::begin();
+    
+    // Start UI Task
     xTaskCreatePinnedToCore(uiTask, "uiTask", 2048, NULL, 1, NULL, 0);
 }
 
@@ -75,9 +84,12 @@ void startPortalMode() {
 
 void startRunningMode() {
     Serial.println("[SYSTEM] ✓ Transitioning to RUNNING state");
+    
     TimeManager::begin();
     TimeManager::sync();
+
     MqttManager::setup(activeCfg.mqttServer, activeCfg.mqttPort, activeCfg.probe_id);
+
     Serial.printf("[SYSTEM] ✓ Probe ID: %s\n", activeCfg.probe_id);
     Serial.printf("[SYSTEM] ✓ MQTT: %s:%d\n", activeCfg.mqttServer, activeCfg.mqttPort);
     
@@ -86,6 +98,7 @@ void startRunningMode() {
 }
 
 void handleRunningState() {
+    // 1. Connection Check
     if (!ConnectionManager::isConnected()) {
         StatusLED::setStatus(ERR_WIFI);
         Serial.println("[SYSTEM] WiFi Lost. Reconnecting...");
@@ -110,28 +123,21 @@ void handleRunningState() {
     }
 
     if (MqttManager::hasPendingCommand()) {
-            PendingCommand cmd = MqttManager::getNextCommand();
-            CommandHandler::process(cmd);
-            MqttManager::clearCommand();
+         PendingCommand cmd = MqttManager::getNextCommand();
+         CommandHandler::process(cmd);
+         MqttManager::clearCommand();
     }
 }
 
 void performTelemetry() {
     Serial.println("\n[DIAG] ═══ Telemetry Cycle ═══");
     NetworkMetrics m = DiagnosticEngine::performFullTest("8.8.8.8");
+    
     String payload = JsonPackager::serializeLight(m, activeCfg.probe_id);
+    
     if (MqttManager::publishTelemetry(payload)) {
         Serial.println("[MQTT] ✓ Telemetry published");
     } else {
         Serial.println("[MQTT] ✗ Telemetry buffered offline");
     }
-}
-
-void performDeepScan() {
-    Serial.println("\n[DIAG] ═══ Deep Scan Requested ═══");
-    MqttManager::publishCommandResult("deep_scan", "processing", "{\"msg\": \"Scan started\"}");
-    EnhancedMetrics em = DiagnosticEngine::performDeepAnalysis("8.8.8.8");
-    String payload = JsonPackager::serializeEnhanced(em, activeCfg.probe_id);
-    Serial.printf("[DIAG] Generated Payload Size: %d bytes\n", payload.length());
-    MqttManager::publishCommandResult("deep_scan", "completed", payload);
 }

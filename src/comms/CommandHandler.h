@@ -23,8 +23,6 @@ private:
     static void handleFactoryReset(String payload);
     static void handlePing(String payload);
     static void handleGetStatus(String payload);
-    
-    static void sendCommandResponse(String commandType, bool success, String message);
 };
 
 #endif

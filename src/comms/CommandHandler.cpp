@@ -1,11 +1,19 @@
 #include "CommandHandler.h"
+#include "MqttManager.h"
+#include "../diagnostics/DiagnosticEngine.h"
+#include "../packaging/JsonPackager.h"
+
+// Needed to access configuration
+extern SystemConfig activeCfg; 
 
 void CommandHandler::begin() {
-    Serial.println("[CMD] Command Handler Ready");
+    Serial.println("[CMD] Command Handler Initialized");
 }
 
 void CommandHandler::process(PendingCommand cmd) {
-    Serial.println("[CMD] Processing: " + cmd.type);
+    
+    Serial.printf("[CMD] ║ PROCESSING: %s\n", cmd.type.c_str());
+    
 
     if (cmd.type == "deep_scan") {
         handleDeepScan(cmd.payload);
@@ -29,27 +37,46 @@ void CommandHandler::process(PendingCommand cmd) {
         handleGetStatus(cmd.payload);
     }
     else {
-        Serial.println("[CMD] Unknown command: " + cmd.type);
-        MqttManager::publishCommandResult(cmd.type, "failed", "{\"error\": \"Unknown command\"}");
+        Serial.println("[CMD]  Unknown command: " + cmd.type);
+        MqttManager::publishCommandResult(cmd.type, "failed", "{\"error\": \"Unknown command type\"}");
     }
 }
+
 void CommandHandler::handleDeepScan(String payload) {
-    MqttManager::publishCommandResult("deep_scan", "processing", "{\"msg\": \"Scan started\"}");
-    EnhancedMetrics em = DiagnosticEngine::performDeepAnalysis("8.8.8.8");
+    // 1. Acknowledge
+    MqttManager::publishCommandResult("deep_scan", "processing", "{\"msg\": \"Scan initiated\"}");
+    
+    Serial.println("[CMD] Starting deep analysis...");
+
+    // 2. Perform Analysis
+    // Fixed: Use "www.google.com" or "1.1.1.1" for TCP Throughput (Port 80)
+    // 8.8.8.8 does not listen on Port 80, causing "Connection failed".
+    EnhancedMetrics em = DiagnosticEngine::performDeepAnalysis("www.google.com");
+    
+    // 3. Serialize
     String probeId = String(ConfigManager::load().probe_id);
     String resultPayload = JsonPackager::serializeEnhanced(em, probeId);
-    Serial.printf("[CMD] Deep Scan Payload Size: %d bytes\n", resultPayload.length());
+    
+    Serial.printf("\n[CMD] Deep Scan Result Size: %d bytes\n", resultPayload.length());
+
+    // 4. Send Result
     MqttManager::publishCommandResult("deep_scan", "completed", resultPayload);
+    
+    
+    Serial.println("[CMD] DEEP SCAN HANDLER COMPLETED");
+    
 }
+
 void CommandHandler::handleConfigUpdate(String payload) {
     if (ConfigManager::updateFromJSON(payload)) {
-        MqttManager::publishCommandResult("config_update", "completed", "{\"msg\": \"Configuration updated. Rebooting.\"}");
+        MqttManager::publishCommandResult("config_update", "completed", "{\"msg\": \"Config updated. Rebooting.\"}");
         delay(1000);
         ESP.restart();
     } else {
-        MqttManager::publishCommandResult("config_update", "failed", "{\"error\": \"Failed to parse or apply config\"}");
+        MqttManager::publishCommandResult("config_update", "failed", "{\"error\": \"Invalid config JSON\"}");
     }
 }
+
 void CommandHandler::handleRestart(String payload) {
     StaticJsonDocument<512> doc;
     deserializeJson(doc, payload);
@@ -61,6 +88,7 @@ void CommandHandler::handleRestart(String payload) {
     delay(delayMs);
     ESP.restart();
 }
+
 void CommandHandler::handleOTAUpdate(String payload) {
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, payload);
@@ -75,12 +103,14 @@ void CommandHandler::handleOTAUpdate(String payload) {
         MqttManager::publishCommandResult("ota_update", "failed", "{\"error\": \"Missing URL\"}");
     }
 }
+
 void CommandHandler::handleFactoryReset(String payload) {
     MqttManager::publishCommandResult("factory_reset", "processing", "{\"msg\": \"Wiping data...\"}");
     StorageManager::wipe();
     delay(1000);
     ESP.restart();
 }
+
 void CommandHandler::handlePing(String payload) {
     StaticJsonDocument<512> doc;
     doc["type"] = "pong";
@@ -91,12 +121,14 @@ void CommandHandler::handlePing(String payload) {
     serializeJson(doc, res);
     MqttManager::publishCommandResult("ping", "completed", res);
 }
+
 void CommandHandler::handleGetStatus(String payload) {
     StaticJsonDocument<512> status;
     status["uptime"] = millis() / 1000;
     status["free_heap"] = ESP.getFreeHeap();
     status["rssi"] = WiFi.RSSI();
     status["ip"] = WiFi.localIP().toString();
+    
     String res;
     serializeJson(status, res);
     MqttManager::publishCommandResult("get_status", "completed", res);
