@@ -1,3 +1,4 @@
+// src/comms/MqttManager.h (Updated)
 #ifndef MQTT_MANAGER_H
 #define MQTT_MANAGER_H
 
@@ -8,8 +9,9 @@
 class MqttManager {
 public:
     static void setup(const char* broker, int port, String probeId);
-    static bool loop(); // Returns true if connected
+    static bool loop();
     static bool publishTelemetry(String payload);
+    static bool publishResponse(String topic, String payload);
     static void syncOfflineLogs();
     static bool isDeepScanRequested();
     static void clearDeepScanFlag();

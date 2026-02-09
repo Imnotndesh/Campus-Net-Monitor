@@ -65,28 +65,18 @@ EnhancedMetrics DiagnosticEngine::performDeepAnalysis(const char* targetHost) {
     em.neighborCount = basic.neighborCount;
     em.overlappingCount = basic.overlappingCount;
     em.congestion = basic.congestion;
-
-    // 2. Radio Environment Analysis (Promiscuous Mode)
-    // The probe disconnects here to sniff raw 802.11 frames
     Serial.println("[DEEP] Initiating 2-second radio environment capture...");
     SnifferStats s = SnifferEngine::analyzeChannel(em.channel, 2000);
     
     em.channelUtilization = s.channelUtilization;
-    // em.beaconLossRate can be calculated here if added to the struct
-
-    // 3. Signal Quality Calculations
-    // Noise floor is typically estimated at -95dBm for the ESP32 radio
     em.noiseFloor = -95;
     em.snr = (float)em.rssi - em.noiseFloor;
 
     // Link Quality Score (0-100)
-    // Weighted formula considering Signal Strength, Packet Loss, and Congestion
     float quality = (em.rssi + 100) * 2; 
     if (em.packetLoss > 0) quality -= (em.packetLoss * 5);
     quality -= (em.channelUtilization * 0.2); // Penalize heavily congested airwaves
     em.linkQuality = constrain(quality, 0, 100);
-
-    // 4. Advanced Network Capabilities
     uint8_t protocol;
     esp_wifi_get_protocol(WIFI_IF_STA, &protocol);
     
@@ -100,13 +90,127 @@ EnhancedMetrics DiagnosticEngine::performDeepAnalysis(const char* targetHost) {
     return em;
 }
 
-/**
- * Estimates throughput by simulating a small data transfer.
- */
 int DiagnosticEngine::measureThroughput(const char* host) {
-    // Phase 1 implementation uses a randomized estimate.
-    // Phase 2 will implement a real HTTP download speed test.
-    return random(500, 2500);
+    Serial.println("[DIAG] Measuring TCP throughput...");
+    
+    const int NUM_ATTEMPTS = 3;
+    int results[NUM_ATTEMPTS];
+    int validResults = 0;
+    
+    for (int attempt = 0; attempt < NUM_ATTEMPTS; attempt++) {
+        WiFiClient client;
+        const int port = 80;
+        const int testDataSize = 8192; // 8KB test
+        
+        Serial.printf("[DIAG] Attempt %d/%d...\n", attempt + 1, NUM_ATTEMPTS);
+        
+        // Try to connect
+        if (!client.connect(host, port, 3000)) { // 3 second timeout
+            Serial.println("[DIAG] Connection failed");
+            results[attempt] = -1;
+            continue;
+        }
+        
+        // Send HTTP GET request
+        String request = "GET / HTTP/1.1\r\n";
+        request += "Host: ";
+        request += host;
+        request += "\r\n";
+        request += "Connection: close\r\n\r\n";
+        
+        unsigned long startTime = millis();
+        client.print(request);
+        
+        // Wait for response headers
+        while (client.connected() && !client.available()) {
+            if (millis() - startTime > 3000) break;
+            delay(1);
+        }
+        
+        // Skip headers to get to body
+        bool headersComplete = false;
+        unsigned long headerTimeout = millis();
+        while (client.connected() || client.available()) {
+            if (client.available()) {
+                String line = client.readStringUntil('\n');
+                if (line == "\r" || line == "") {
+                    headersComplete = true;
+                    break;
+                }
+                headerTimeout = millis();
+            }
+            if (millis() - headerTimeout > 2000) break;
+        }
+        
+        if (!headersComplete) {
+            Serial.println("[DIAG] Failed to read headers");
+            client.stop();
+            results[attempt] = -1;
+            continue;
+        }
+        
+        // Now measure body download speed
+        unsigned long dataStartTime = millis();
+        int totalBytes = 0;
+        unsigned long lastByteTime = millis();
+        
+        while (client.connected() || client.available()) {
+            if (client.available()) {
+                char c = client.read();
+                totalBytes++;
+                lastByteTime = millis();
+            }
+            
+            // Stop conditions
+            if (totalBytes >= testDataSize) break;
+            if (millis() - lastByteTime > 2000) break; // 2s idle timeout
+        }
+        
+        unsigned long dataEndTime = millis();
+        client.stop();
+        
+        if (totalBytes == 0) {
+            Serial.println("[DIAG] No data received");
+            results[attempt] = -1;
+            continue;
+        }
+        
+        // Calculate throughput
+        float durationSec = (dataEndTime - dataStartTime) / 1000.0;
+        if (durationSec <= 0) durationSec = 0.001;
+        
+        float bytesPerSec = totalBytes / durationSec;
+        int kbps = (int)((bytesPerSec * 8) / 1024);
+        
+        Serial.printf("[DIAG] Attempt %d: %d bytes in %.2fs = %d kbps\n", 
+                      attempt + 1, totalBytes, durationSec, kbps);
+        
+        results[attempt] = kbps;
+        validResults++;
+        
+        delay(100); // Small delay between attempts
+    }
+    
+    // Calculate average of valid results
+    if (validResults == 0) {
+        Serial.println("[DIAG] All throughput attempts failed");
+        return 0; // Return 0 instead of -1 for failed test
+    }
+    
+    int sum = 0;
+    int count = 0;
+    for (int i = 0; i < NUM_ATTEMPTS; i++) {
+        if (results[i] > 0) {
+            sum += results[i];
+            count++;
+        }
+    }
+    
+    int avgKbps = count > 0 ? sum / count : 0;
+    Serial.printf("[DIAG] Average throughput: %d kbps (%d/%d valid attempts)\n", 
+                  avgKbps, validResults, NUM_ATTEMPTS);
+    
+    return avgKbps;
 }
 
 /**
