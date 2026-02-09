@@ -1,28 +1,33 @@
 #ifndef CONNECTION_MANAGER_H
 #define CONNECTION_MANAGER_H
 
-#include <Arduino.h>
 #include <WiFi.h>
-#include <DNSServer.h>
 #include <WebServer.h>
+#include <DNSServer.h>
+#include <ESPmDNS.h>
 #include "../storage/StorageManager.h"
-#include "../storage/ConfigManager.h" // Add this
+#include "../storage/ConfigManager.h"
+
+#define MAX_FAILURES 3
 
 class ConnectionManager {
 public:
     static void begin();
-    static bool tryConnect(String ssid, String pass);
-    static void startCaptivePortal();
-    static void handlePortal(); 
-    static bool isConnected();
     static bool establishConnection(String ssid, String pass);
-    static const int MAX_FAILURES = 5;
+    static void handlePortal(); // Call this in loop()
+    static bool isConnected();
 
 private:
-    static void handleRoot();
-    static void handleSave();
     static WebServer server;
     static DNSServer dnsServer;
+    static const byte DNS_PORT;
+    static bool isPortalActive;
+
+    static bool tryConnect(String ssid, String pass);
+    static void startCaptivePortal();
+    static void handleRoot();
+    static void handleSave();
+    static void handleNotFound();
 };
 
 #endif

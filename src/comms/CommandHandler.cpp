@@ -213,7 +213,6 @@ void CommandHandler::handleGetStatus(JsonObject& params) {
     
     StaticJsonDocument<512> status;
     
-    status["probe_id"] = "PROBE-SEC-05";
     status["type"] = "status_report";
     status["timestamp"] = millis() / 1000;
     
@@ -233,6 +232,7 @@ void CommandHandler::handleGetStatus(JsonObject& params) {
     
     // Configuration
     SystemConfig cfg = ConfigManager::load();
+    status["probe_id"] = cfg.probe_id ;
     status["report_interval"] = cfg.reportInterval;
     status["mqtt_server"] = cfg.mqttServer;
     status["mqtt_port"] = cfg.mqttPort;

@@ -5,11 +5,12 @@
 #include <Preferences.h>
 
 struct SystemConfig {
+    char probe_id[32];
     char mqttServer[64];
     int mqttPort;
     char telemetryTopic[128];
     char cmdTopic[128];
-    int reportInterval; // in seconds
+    int reportInterval;
 };
 
 class ConfigManager {
@@ -17,7 +18,7 @@ public:
     static void begin();
     static SystemConfig load();
     static void save(SystemConfig config);
-    static void updateFromJSON(String json);
+    static bool updateFromJSON(String json);
     static bool isConfigured();
 };
 

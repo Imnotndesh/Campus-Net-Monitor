@@ -2,20 +2,23 @@
 
 WebServer ConnectionManager::server(80);
 DNSServer ConnectionManager::dnsServer;
-const byte DNS_PORT = 53;
+const byte ConnectionManager::DNS_PORT = 53;
+bool ConnectionManager::isPortalActive = false;
+
+IPAddress apIP(192, 168, 4, 1);
+IPAddress netMsk(255, 255, 255, 0);
 
 void ConnectionManager::begin() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
+    delay(100);
 }
 
 bool ConnectionManager::tryConnect(String ssid, String pass) {
     if (ssid == "") return false;
 
-    Serial.printf("Connecting to %s...", ssid.c_str());
+    Serial.printf("[CONN] Connecting to %s...", ssid.c_str());
     WiFi.begin(ssid.c_str(), pass.c_str());
-
-    // Wait up to 15 seconds for connection
     int retries = 0;
     while (WiFi.status() != WL_CONNECTED && retries < 30) {
         delay(500);
@@ -24,93 +27,152 @@ bool ConnectionManager::tryConnect(String ssid, String pass) {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
+        Serial.println("\n[CONN] Connected! IP: " + WiFi.localIP().toString());
         return true;
     } else {
-        Serial.println("\nConnection Failed.");
+        Serial.println("\n[CONN] Connection Failed.");
         return false;
     }
 }
 
 void ConnectionManager::startCaptivePortal() {
+    isPortalActive = true;
     WiFi.mode(WIFI_AP);
-    // Unique SSID based on ESP ChipID so multiple probes don't clash
-    String apName = "Probe-Setup-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+
+    WiFi.softAPConfig(apIP, apIP, netMsk);
+
+    uint32_t chipId = (uint32_t)ESP.getEfuseMac();
+    String apName = "Probe-Setup-" + String(chipId, HEX);
     WiFi.softAP(apName.c_str());
 
-    // Redirect all DNS requests to the ESP's IP
+    Serial.println("[PORTAL] AP Started: " + apName);
+    Serial.print("[PORTAL] IP Address: ");
+    Serial.println(WiFi.softAPIP());
+
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
-    // Web Routes
+    if (MDNS.begin("setup")) {
+        Serial.println("[PORTAL] Setup UI started at: http://setup.local");
+    } else {
+        Serial.println("[PORTAL] Error setting up mDNS responder!");
+    }
+
     server.on("/", handleRoot);
     server.on("/save", HTTP_POST, handleSave);
-    server.onNotFound(handleRoot); // Redirect 404s to root for captive portal
+    server.on("/generate_204", handleRoot);
+    server.on("/gen_204", handleRoot);
+    server.on("/hotspot-detect.html", handleRoot); 
+    server.on("/fwlink", handleRoot);
+    
+    server.onNotFound(handleNotFound);
     server.begin();
-
-    Serial.println("Captive Portal Started: " + apName);
-    Serial.print("Portal IP: ");
-    Serial.println(WiFi.softAPIP());
 }
 
 void ConnectionManager::handlePortal() {
-    dnsServer.processNextRequest();
-    server.handleClient();
+    if (isPortalActive) {
+        dnsServer.processNextRequest();
+        server.handleClient();
+    }
 }
 
 void ConnectionManager::handleRoot() {
-    String html = "<html><head><title>Probe Setup</title>";
-    html += "<style>body{font-family:sans-serif; padding:20px;} input{margin-bottom:10px; width:100%;}</style></head>";
-    html += "<body><h1>Campus Probe Setup</h1>";
-    html += "<form action='/save' method='POST'>";
-    
-    html += "<h3>Network Settings</h3>";
-    html += "SSID: <input type='text' name='ssid' placeholder='WiFi Name'><br>";
-    html += "Password: <input type='password' name='pass' placeholder='WiFi Password'><br>";
-    
-    html += "<h3>Reporting Settings</h3>";
-    html += "MQTT Server IP: <input type='text' name='mqtt_srv' value='192.168.100.27'><br>";
-    html += "MQTT Port: <input type='number' name='mqtt_port' value='1883'><br>";
-    html += "Probe ID: <input type='text' name='probe_id' value='SEC-05-ECA'><br>";
-    
-    html += "<input type='submit' value='Save & Commission Probe' style='background:#007bff; color:white; padding:10px; border:none; cursor:pointer;'>";
-    html += "</form></body></html>";
-    
+    SystemConfig currentCfg = ConfigManager::load();
+    String currentProbeId = String(currentCfg.probe_id);
+    if (currentProbeId.length() == 0) currentProbeId = "PROBE-NEW";
+
+    String html = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Campus Probe Setup</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f2f2f7; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+    h1 { color: #1c1c1e; margin-bottom: 1.5rem; text-align: center; font-size: 24px; }
+    h3 { color: #8e8e93; font-size: 14px; text-transform: uppercase; margin-top: 1.5rem; margin-bottom: 0.5rem; letter-spacing: 0.5px; }
+    input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #d1d1d6; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
+    input:focus { border-color: #007aff; outline: none; }
+    input[type="submit"] { background-color: #007aff; color: white; font-weight: bold; border: none; cursor: pointer; margin-top: 1rem; transition: background 0.2s; }
+    input[type="submit"]:hover { background-color: #0056b3; }
+    .note { font-size: 12px; color: #8e8e93; text-align: center; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Probe Setup</h1>
+    <form action="/save" method="POST">
+      
+      <h3>WiFi Network</h3>
+      <input type="text" name="ssid" placeholder="SSID (Network Name)" required>
+      <input type="password" name="pass" placeholder="Password">
+      
+      <h3>Configuration</h3>
+      <input type="text" name="probe_id" placeholder="Probe ID" value=")rawliteral" + currentProbeId + R"rawliteral(">
+      <input type="text" name="mqtt_srv" placeholder="MQTT Broker IP" value=")rawliteral" + String(currentCfg.mqttServer) + R"rawliteral(">
+      <input type="number" name="mqtt_port" placeholder="MQTT Port" value=")rawliteral" + String(currentCfg.mqttPort) + R"rawliteral(">
+      
+      <input type="submit" value="Save & Connect">
+    </form>
+    <div class="note">Device will reboot after saving.</div>
+  </div>
+</body>
+</html>
+)rawliteral";
+
     server.send(200, "text/html", html);
 }
 
 void ConnectionManager::handleSave() {
-    // The names here must match the <input name='...'> in handleRoot
     String ssid = server.arg("ssid");
     String pass = server.arg("pass");
+    String probeId = server.arg("probe_id");
     String mqttSrv = server.arg("mqtt_srv");
     int mqttPort = server.arg("mqtt_port").toInt();
 
     if (ssid.length() > 0 && mqttSrv.length() > 0) {
-        // 1. Save WiFi
         StorageManager::saveWifiCredentials(ssid, pass);
-        
-        // 2. Save MQTT
-        SystemConfig cfg;
-        strncpy(cfg.mqttServer, mqttSrv.c_str(), 64);
+        SystemConfig cfg = ConfigManager::load();
+        strncpy(cfg.mqttServer, mqttSrv.c_str(), sizeof(cfg.mqttServer));
+        strncpy(cfg.probe_id, probeId.c_str(), sizeof(cfg.probe_id));
         cfg.mqttPort = mqttPort;
-        strncpy(cfg.telemetryTopic, "campus/probes/telemetry", 128);
-        strncpy(cfg.cmdTopic, "campus/probes/cmd", 128);
-        cfg.reportInterval = 30;
+        
+        // Ensure defaults if missing
+        if (strlen(cfg.telemetryTopic) == 0) strncpy(cfg.telemetryTopic, "campus/probes/telemetry", sizeof(cfg.telemetryTopic));
         
         ConfigManager::save(cfg);
-        
-        // 3. CRITICAL FIX: Reset failure counters when new credentials are saved
         StorageManager::resetFailureCount();
         StorageManager::setRebootCount(0);
         
-        Serial.println("[PORTAL] Credentials saved. Resetting failure counters.");
+        Serial.println("[PORTAL] Config saved. Rebooting...");
         
-        server.send(200, "text/html", "<h1>Success</h1><p>Probe configured. Rebooting...</p>");
-        delay(2000);
+        String html = "<html><head><meta name='viewport' content='width=device-width'><style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;text-align:center;}</style></head><body><div><h1>Saved!</h1><p>Probe is restarting...</p><p>Connect your device back to the main WiFi.</p></div></body></html>";
+        server.send(200, "text/html", html);
+        
+        delay(1000);
         ESP.restart();
     } else {
-        server.send(400, "text/html", "Error: SSID and MQTT IP are required.");
+        server.send(400, "text/html", "Error: Missing required fields.");
     }
+}
+
+void ConnectionManager::handleNotFound() {
+    if (isPortalActive) {
+        server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString(), true);
+        server.send(302, "text/plain", "");
+    } else {
+        server.send(404, "text/plain", "Not Found");
+    }
+}
+
+String toStringIp(IPAddress ip) {
+  String res = "";
+  for (int i = 0; i < 3; i++) {
+    res += String((ip >> (8 * i)) & 0xFF) + ".";
+  }
+  res += String(((ip >> 8 * 3)) & 0xFF);
+  return res;
 }
 
 bool ConnectionManager::isConnected() {
@@ -119,26 +181,24 @@ bool ConnectionManager::isConnected() {
 
 bool ConnectionManager::establishConnection(String ssid, String pass) {
     int fails = StorageManager::getFailureCount();
-
     if (fails >= MAX_FAILURES) {
-        Serial.println("[CONN] Critical Failure Threshold reached. Forcing Portal.");
+        Serial.println("[CONN] Too many failures. Starting Portal.");
         startCaptivePortal();
-        return false; // Tells main we are now in Portal mode
+        return false;
     }
 
     if (tryConnect(ssid, pass)) {
         StorageManager::resetFailureCount();
-        return true; // Connection successful
+        return true;
     } else {
         StorageManager::incrementFailureCount();
-        Serial.printf("[CONN] Connection failed. Attempt %d/%d\n", StorageManager::getFailureCount(), MAX_FAILURES);
-        
+        Serial.printf("[CONN] Failed. Attempt %d/%d\n", StorageManager::getFailureCount(), MAX_FAILURES);
         if (StorageManager::getFailureCount() >= MAX_FAILURES) {
             startCaptivePortal();
             return false;
         }
-        
-        ESP.restart(); // Reboot to try again fresh
+        delay(1000);
+        ESP.restart();
         return false; 
     }
 }

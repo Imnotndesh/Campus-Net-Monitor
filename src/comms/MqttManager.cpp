@@ -1,34 +1,47 @@
 #include "MqttManager.h"
-#include "CommandHandler.h"
 
 WiFiClient MqttManager::espClient;
 PubSubClient MqttManager::client(espClient);
 String MqttManager::_probeId;
 bool MqttManager::_deepScanTriggered = false;
+PendingCommand MqttManager::_currentCommand;
 
 void MqttManager::setup(const char* broker, int port, String probeId) {
     _probeId = probeId;
     client.setServer(broker, port);
     client.setCallback(callback);
-    client.setBufferSize(1024);
+    client.setBufferSize(2048);
 }
 
 void MqttManager::callback(char* topic, byte* payload, unsigned int length) {
-    String topicStr = String(topic);
+    String message;
+    for (int i = 0; i < length; i++) {
+        message += (char)payload[i];
+    }
     
-    // Convert payload to String
-    char buffer[length + 1];
-    memcpy(buffer, payload, length);
-    buffer[length] = '\0';
-    String message = String(buffer);
-    
-    Serial.printf("[MQTT] Message on topic: %s\n", topic);
-    if (topicStr.indexOf("/cmd") != -1 || topicStr.indexOf("/command") != -1) {
-        CommandHandler::processCommand(topicStr, message);
-    } else if (topicStr.indexOf("/telemetry") != -1) {
-        if ((char)payload[0] == '1') {
-            _deepScanTriggered = true;
+    Serial.printf("[MQTT] Message on %s: %s\n", topic, message.c_str());
+
+    DynamicJsonDocument doc(2048);
+    DeserializationError error = deserializeJson(doc, message);
+
+    if (!error) {
+
+        if (doc.containsKey("command")) {
+            _currentCommand.type = doc["command"].as<String>();
+
+            if (doc.containsKey("payload")) {
+                String payloadStr;
+                serializeJson(doc["payload"], payloadStr);
+                _currentCommand.payload = payloadStr;
+            } else {
+                _currentCommand.payload = "{}";
+            }
+            
+            _currentCommand.active = true;
+            Serial.println("[MQTT] Command queued: " + _currentCommand.type);
         }
+    } else {
+        Serial.println("[MQTT] JSON Parse Error");
     }
 }
 
@@ -36,17 +49,15 @@ bool MqttManager::reconnect() {
     if (WiFi.status() != WL_CONNECTED) return false;
     
     if (!client.connected()) {
-        Serial.print("[MQTT] Attempting connection...");
-        if (client.connect(_probeId.c_str())) {
-            Serial.println("connected.");
-            String cmdTopic = "campus/probes/" + _probeId + "/cmd";
-            String broadcastTopic = "campus/probes/broadcast/cmd";
-            
+        Serial.print("[MQTT] Connecting...");
+        String clientId = "ESP32-" + _probeId;
+        
+        if (client.connect(clientId.c_str())) {
+            Serial.println("connected");
+
+            String cmdTopic = "campus/probes/" + _probeId + "/command";
             client.subscribe(cmdTopic.c_str());
-            client.subscribe(broadcastTopic.c_str());
-            
-            Serial.println("[MQTT] Subscribed to: " + cmdTopic);
-            Serial.println("[MQTT] Subscribed to: " + broadcastTopic);
+            Serial.println("[MQTT] Subscribed: " + cmdTopic);
             
             syncOfflineLogs();
         } else {
@@ -56,29 +67,48 @@ bool MqttManager::reconnect() {
     return client.connected();
 }
 
+bool MqttManager::hasPendingCommand() {
+    return _currentCommand.active;
+}
+
+PendingCommand MqttManager::getNextCommand() {
+    return _currentCommand;
+}
+
+void MqttManager::clearCommand() {
+    _currentCommand.active = false;
+    _currentCommand.type = "";
+    _currentCommand.payload = "";
+}
+
+void MqttManager::publishCommandResult(String cmdType, String status, String resultJson) {
+    String topic = "campus/probes/" + _probeId + "/result";
+    
+    DynamicJsonDocument doc(2048);
+    doc["probe_id"] = _probeId;
+    doc["command"] = cmdType;
+    doc["status"] = status;
+
+    DynamicJsonDocument resDoc(1024);
+    deserializeJson(resDoc, resultJson);
+    doc["result"] = resDoc;
+
+    String output;
+    serializeJson(doc, output);
+    
+    if (client.connected()) {
+        client.publish(topic.c_str(), output.c_str());
+        Serial.println("[MQTT] Result sent for " + cmdType);
+    }
+}
 void MqttManager::syncOfflineLogs() {
     if (StorageManager::getBufferSize() == 0) return;
-
-    Serial.println("[MQTT] Draining local buffer to server...");
-    String logs = StorageManager::readBuffer();
-    
-    int start = 0;
-    int end = logs.indexOf('\n');
-    while (end != -1) {
-        String record = logs.substring(start, end);
-        client.publish("campus/probes/telemetry/offline", record.c_str());
-        start = end + 1;
-        end = logs.indexOf('\n', start);
-    }
-    StorageManager::clearBuffer();
-    Serial.println("[MQTT] Buffer cleared.");
 }
 
 bool MqttManager::publishTelemetry(String payload) {
     if (client.connected()) {
         return client.publish("campus/probes/telemetry", payload.c_str());
     } else {
-        Serial.println("[ERROR] MQTT Offline. Redirecting to LittleFS.");
         return StorageManager::appendToBuffer(payload);
     }
 }
