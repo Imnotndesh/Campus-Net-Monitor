@@ -122,6 +122,22 @@ void MqttManager::publishCommandResult(String cmdType, String status, String res
         Serial.println("[MQTT] ✗ Failed to buffer result!");
     }
 }
+bool MqttManager::publishBroadcast(String topic, String payload) {
+    if (!client.connected()) {
+        Serial.println("[MQTT] Not connected, cannot broadcast");
+        return false;
+    }
+    
+    bool success = client.publish(topic.c_str(), payload.c_str());
+    
+    if (success) {
+        Serial.printf("[MQTT] Broadcast published to: %s\n", topic.c_str());
+    } else {
+        Serial.println("[MQTT] Broadcast publish failed");
+    }
+    
+    return success;
+}
 
 bool MqttManager::publishResultInternal(String cmdType, String status, String resultJson,String cmdId) {
     String topic = "campus/probes/" + _probeId + "/result";

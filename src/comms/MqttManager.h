@@ -26,12 +26,11 @@ public:
     static bool hasPendingCommand();
     static PendingCommand getNextCommand();
     static void clearCommand();
-    
-    // Sync Methods
     static void syncOfflineLogs();
     static void syncBufferedResults();
     
     static bool isConnected();
+    static bool publishBroadcast(String topic, String payload);
 
 private:
     static void callback(char* topic, byte* payload, unsigned int length);

@@ -1,3 +1,4 @@
+// main.cpp - Clean and modular
 #include <Arduino.h>
 #include "storage/StorageManager.h"
 #include "storage/ConfigManager.h"
@@ -9,6 +10,7 @@
 #include "packaging/TimeManager.h"
 #include "actions/led/StatusLED.h"
 #include "actions/button/ButtonManager.h"
+#include "broadcasting/BroadcastManager.h"
 
 // --- Global State ---
 enum SystemState { PORTAL, RUNNING };
@@ -72,7 +74,7 @@ void setupSystem() {
     ConfigManager::begin();
     CommandHandler::begin();
     
-    // Start UI Task
+    // Start UI Task on Core 0
     xTaskCreatePinnedToCore(uiTask, "uiTask", 2048, NULL, 1, NULL, 0);
 }
 
@@ -83,29 +85,44 @@ void startPortalMode() {
 }
 
 void startRunningMode() {
+    Serial.println("[SYSTEM] ✓ Transitioning to RUNNING state");
+    
     TimeManager::begin();
     TimeManager::sync();
 
     activeCfg = ConfigManager::load();
     
     if (activeCfg.reportInterval > 1000) {
+        Serial.printf("[CONFIG] Fixing reportInterval from %d to 60\n", activeCfg.reportInterval);
         activeCfg.reportInterval = 60;
         ConfigManager::save(activeCfg);
     }
+    
+    Serial.printf("[SYSTEM] ✓ Report Interval: %d seconds\n", activeCfg.reportInterval);
+    Serial.printf("[SYSTEM] ✓ Probe ID: %s\n", activeCfg.probe_id);
+    Serial.printf("[SYSTEM] ✓ MQTT: %s:%d\n", activeCfg.mqttServer, activeCfg.mqttPort);
+    
     MqttManager::setup(activeCfg.mqttServer, activeCfg.mqttPort, activeCfg.probe_id);
+    
+    // Start broadcast manager on Core 0
+    BroadcastManager::begin(&activeCfg);
+    
     StatusLED::setStatus(STATUS_OK);
     currentState = RUNNING;
 }
 
 void handleRunningState() {
+    // 1. Connection Check
     if (!ConnectionManager::isConnected()) {
         StatusLED::setStatus(ERR_WIFI);
+        Serial.println("[SYSTEM] WiFi Lost. Reconnecting...");
         WifiCredentials creds = StorageManager::loadWifiCredentials();
         if (!ConnectionManager::establishConnection(creds.ssid, creds.password)) {
             startPortalMode();
         }
         return;
     }
+    
     MqttManager::loop();
     
     if (MqttManager::isConnected()) {
@@ -114,15 +131,14 @@ void handleRunningState() {
         StatusLED::setStatus(ERR_MQTT);
     }
 
+    // 2. Process Commands
     if (MqttManager::hasPendingCommand()) {
-    Serial.println("[DEBUG] *** PENDING COMMAND DETECTED ***");
-    PendingCommand cmd = MqttManager::getNextCommand();
-    Serial.printf("[DEBUG] Processing command: type=%s, id=%s\n", cmd.type.c_str(), cmd.id.c_str());
-    CommandHandler::process(cmd);
-    MqttManager::clearCommand();
-    Serial.println("[DEBUG] *** COMMAND PROCESSING COMPLETE ***");
+        PendingCommand cmd = MqttManager::getNextCommand();
+        CommandHandler::process(cmd);
+        MqttManager::clearCommand();
     }
     
+    // 3. Regular Telemetry
     static unsigned long lastReport = millis();
     unsigned long elapsed = millis() - lastReport;
     unsigned long interval = activeCfg.reportInterval * 1000;
