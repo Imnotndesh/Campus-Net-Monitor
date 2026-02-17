@@ -11,6 +11,7 @@
 struct PendingCommand {
     String type;
     String payload;
+    String id;
     bool active = false;
 };
 
@@ -20,25 +21,22 @@ public:
     static bool loop();
     static bool publishTelemetry(String payload);
     
-    // Helper to send standardized command results back to API
-    // If MQTT is disconnected, results are automatically buffered to disk
-    static void publishCommandResult(String cmdType, String status, String resultJson);
-    
-    // Command Queue Methods (Called by main.cpp)
+    static void publishCommandResult(String cmdType, String status, String resultPayload, String cmdId);  
+
     static bool hasPendingCommand();
     static PendingCommand getNextCommand();
     static void clearCommand();
     
     // Sync Methods
     static void syncOfflineLogs();
-    static void syncBufferedResults(); // NEW: Sync command results from disk
+    static void syncBufferedResults();
     
     static bool isConnected();
 
 private:
     static void callback(char* topic, byte* payload, unsigned int length);
     static bool reconnect();
-    static bool publishResultInternal(String cmdType, String status, String resultJson);
+    static bool publishResultInternal(String cmdType, String status, String resultJson,String cmdId);
     
     static WiFiClient espClient;
     static PubSubClient client;

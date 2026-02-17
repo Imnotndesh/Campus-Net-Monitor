@@ -16,13 +16,17 @@ public:
     static void process(PendingCommand cmd);
 
 private:
-    static void handleDeepScan(String payload);
-    static void handleConfigUpdate(String payload);
-    static void handleRestart(String payload);
-    static void handleOTAUpdate(String payload);
-    static void handleFactoryReset(String payload);
-    static void handlePing(String payload);
-    static void handleGetStatus(String payload);
+    static void handleDeepScan(PendingCommand cmd);
+    static void handleConfigUpdate(PendingCommand cmd);
+    static void handleRestart(PendingCommand cmd);
+    static void handleOTAUpdate(PendingCommand cmd);
+    static void handleFactoryReset(PendingCommand cmd);
+    static void handlePing(PendingCommand cmd);
+    static void handleGetStatus(PendingCommand cmd);
+    static void handleGetConfig(PendingCommand cmd);
+    static void handleSetWifi(PendingCommand cmd);
+    static void handleSetMqtt(PendingCommand cmd);
+    static void handleRenameProbe(PendingCommand cmd);
 };
 
 #endif

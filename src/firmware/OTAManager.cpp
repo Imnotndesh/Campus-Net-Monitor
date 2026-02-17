@@ -1,41 +1,105 @@
+// OTAManager.cpp
 #include "OTAManager.h"
-#include <WiFiClient.h>
 
-void OTAManager::checkForUpdates(const char* updateUrl, const char* currentVersion) {
-    if (WiFi.status() != WL_CONNECTED) return;
+void (*OTAManager::progressCallback)(int, int, const char*) = nullptr;
+void (*OTAManager::errorCallback)(int, const char*) = nullptr;
+void (*OTAManager::startCallback)(const char*) = nullptr;
+void (*OTAManager::finishCallback)(const char*) = nullptr;
+String OTAManager::currentCmdId = "";
 
-    Serial.println("[OTA] Checking for updates...");
+void OTAManager::setProgressCallback(void (*callback)(int, int, const char*)) {
+    progressCallback = callback;
+}
+
+void OTAManager::setErrorCallback(void (*callback)(int, const char*)) {
+    errorCallback = callback;
+}
+
+void OTAManager::setStartCallback(void (*callback)(const char*)) {
+    startCallback = callback;
+}
+
+void OTAManager::setFinishCallback(void (*callback)(const char*)) {
+    finishCallback = callback;
+}
+
+bool OTAManager::performUpdate(const char* url, const char* cmdId) {
+    currentCmdId = String(cmdId);
     
-    // Create a WiFiClient for the update process
-    WiFiClient client;
-
-    // Set callbacks for visual/log feedback
-    httpUpdate.onStart(update_started);
-    httpUpdate.onEnd(update_finished);
-    httpUpdate.onProgress(update_progress);
-    httpUpdate.onError(update_error);
-
-    // Provide the 'client' as the first parameter
-    t_httpUpdate_return ret = httpUpdate.update(client, updateUrl, currentVersion);
-
-    switch (ret) {
-        case HTTP_UPDATE_FAILED:
-            Serial.printf("[OTA] Update Failed (Error %d): %s\n", 
-                          httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
-            break;
-        case HTTP_UPDATE_NO_UPDATES:
-            Serial.println("[OTA] No updates available.");
-            break;
-        case HTTP_UPDATE_OK:
-            Serial.println("[OTA] Update successful. Rebooting...");
-            break;
+    if (WiFi.status() != WL_CONNECTED) {
+        if (errorCallback) errorCallback(-1, currentCmdId.c_str());
+        return false;
     }
-}
 
-// Ensure these functions remain in the file
-void OTAManager::update_started() { Serial.println("[OTA] Update process started."); }
-void OTAManager::update_finished() { Serial.println("[OTA] Update process finished."); }
-void OTAManager::update_progress(int cur, int total) { 
-    Serial.printf("[OTA] Progress: %d%%\n", (cur * 100) / total); 
+    if (startCallback) startCallback(currentCmdId.c_str());
+    
+    HTTPClient http;
+    http.begin(url);
+    
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[OTA] HTTP Failed: %d\n", httpCode);
+        if (errorCallback) errorCallback(httpCode, currentCmdId.c_str());
+        http.end();
+        return false;
+    }
+
+    int len = http.getSize();
+    bool canBegin = Update.begin(len);
+    if (!canBegin) {
+        Serial.println("[OTA] Not enough space");
+        if (errorCallback) errorCallback(-2, currentCmdId.c_str());
+        http.end();
+        return false;
+    }
+
+    WiFiClient* stream = http.getStreamPtr();
+    size_t written = 0;
+    uint8_t buff[128];
+    int lastProgress = -1;
+
+    while (http.connected() && (len > 0 || len == -1)) {
+        size_t size = stream->available();
+        if (size) {
+            int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
+            Update.write(buff, c);
+            written += c;
+
+            if (len > 0) {
+                len -= c;
+                int progress = (written * 100) / (written + len);
+                if (progress != lastProgress && progressCallback) {
+                    progressCallback(written, written + len, currentCmdId.c_str());
+                    lastProgress = progress;
+                }
+            }
+        }
+        delay(1);
+    }
+
+    if (written != http.getSize()) {
+        Serial.printf("[OTA] Write Failed. Written: %d / %d\n", written, http.getSize());
+        if (errorCallback) errorCallback(-3, currentCmdId.c_str());
+        http.end();
+        return false;
+    }
+
+    if (!Update.end()) {
+        Serial.println("[OTA] End Failed");
+        if (errorCallback) errorCallback(-4, currentCmdId.c_str());
+        http.end();
+        return false;
+    }
+
+    if (!Update.isFinished()) {
+        Serial.println("[OTA] Update not finished");
+        if (errorCallback) errorCallback(-5, currentCmdId.c_str());
+        http.end();
+        return false;
+    }
+
+    Serial.println("[OTA] Update Success!");
+    if (finishCallback) finishCallback(currentCmdId.c_str());
+    http.end();
+    return true;
 }
-void OTAManager::update_error(int err) { Serial.printf("[OTA] Error Code: %d\n", err); }

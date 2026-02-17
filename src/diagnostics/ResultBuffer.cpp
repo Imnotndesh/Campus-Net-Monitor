@@ -1,12 +1,8 @@
 #include "ResultBuffer.h"
-
-// 1. INCREASED SIZE: 8KB is too small for multiple deep scan records. 
-// Deep scans are complex objects. 16KB is safer.
 DynamicJsonDocument ResultBuffer::buffer(16384);
 bool ResultBuffer::initialized = false;
 
 void ResultBuffer::begin() {
-    // Fixed: Use LittleFS with format-on-fail enabled
     if (!LittleFS.begin(true)) {
         Serial.println("[RBUF]  Failed to mount LittleFS (Formatting...)");
         return;
@@ -60,7 +56,7 @@ bool ResultBuffer::hasBufferedResults() {
 }
 
 BufferedResult ResultBuffer::getNextResult() {
-    BufferedResult res = {"", "", "", 0};
+    BufferedResult res = {"", "", "","",0};
     if (!hasBufferedResults()) return res;
     
     JsonArray results = buffer["results"].as<JsonArray>();
@@ -70,13 +66,9 @@ BufferedResult ResultBuffer::getNextResult() {
     res.status = obj["status"].as<String>();
     res.timestamp = obj["timestamp"];
 
-    // --- CRITICAL FIX START ---
-    // Since we saved it as a nested object, we must serialize it back to a string for MQTT.
-    // This perfectly reconstructs the JSON string that was missing before.
     String rawRes;
     serializeJson(obj["result"], rawRes);
     res.resultJson = rawRes;
-    // --- CRITICAL FIX END ---
     
     return res;
 }
@@ -125,7 +117,6 @@ bool ResultBuffer::loadBuffer() {
         Serial.println("[RBUF] Buffer corrupted, resetting.");
         buffer.clear();
         buffer.createNestedArray("results");
-        // Save clean state immediately to fix corruption
         saveBuffer();
         return false;
     }
@@ -134,7 +125,6 @@ bool ResultBuffer::loadBuffer() {
 }
 
 bool ResultBuffer::saveBuffer() {
-    // Open with "w" to truncate and overwrite
     File file = LittleFS.open(RESULT_BUFFER_FILE, "w");
     if (!file) {
         Serial.println("[RBUF]  Failed to open file for writing");

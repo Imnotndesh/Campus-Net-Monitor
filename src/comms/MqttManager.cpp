@@ -23,7 +23,6 @@ void MqttManager::callback(char* topic, byte* payload, unsigned int length) {
         message += (char)payload[i];
     }
 
-    // Parse JSON Command
     DynamicJsonDocument doc(2048);
     DeserializationError error = deserializeJson(doc, message);
 
@@ -32,16 +31,17 @@ void MqttManager::callback(char* topic, byte* payload, unsigned int length) {
         return;
     }
     
-    // Debug: Print all JSON keys
     for (JsonPair kv : doc.as<JsonObject>()) {
         Serial.printf("%s ", kv.key().c_str());
     }
     Serial.println();
     
-    // Check for "command" field
     if (doc.containsKey("command")) {
         _currentCommand.type = doc["command"].as<String>();
+        _currentCommand.id = doc["command_id"].as<String>();
         Serial.printf("[MQTT] ║ Command Type: %s\n", _currentCommand.type.c_str());
+        Serial.printf("[MQTT] ║ Command ID: %s\n", _currentCommand.id.c_str());
+        
         if (doc.containsKey("payload")) {
             String payloadStr;
             serializeJson(doc["payload"], payloadStr);
@@ -55,9 +55,6 @@ void MqttManager::callback(char* topic, byte* payload, unsigned int length) {
         _currentCommand.active = true;
     } else {
         Serial.println("[MQTT] ║ No 'command' field in JSON!");
-        Serial.println("[MQTT] ║ Full JSON structure:");
-        serializeJsonPretty(doc, Serial);
-        Serial.println();
     }
 }
 
@@ -108,34 +105,32 @@ bool MqttManager::reconnect() {
     return client.connected();
 }
 
-void MqttManager::publishCommandResult(String cmdType, String status, String resultJson) {
-    Serial.printf("[MQTT] Publishing result: cmd=%s, status=%s\n", 
-                  cmdType.c_str(), status.c_str());
+void MqttManager::publishCommandResult(String cmdType, String status, String resultPayload, String cmdId) {
+    Serial.printf("[MQTT] Publishing result: cmd=%s, status=%s, id=%s\n", cmdType.c_str(), status.c_str(), cmdId.c_str());
     
     if (client.connected()) {
-        // Try to publish directly
-        if (publishResultInternal(cmdType, status, resultJson)) {
+        if (publishResultInternal(cmdType, status, resultPayload, cmdId)) {
             Serial.println("[MQTT] ✓ Result published immediately");
             return;
         }
     }
     
-    // If publish failed or not connected, buffer to disk
     Serial.println("[MQTT] ⚠ Not connected or publish failed, buffering to disk");
-    if (ResultBuffer::saveResult(cmdType, status, resultJson)) {
+    if (ResultBuffer::saveResult(cmdType, status, resultPayload)) {
         Serial.println("[MQTT] ✓ Result buffered to disk for later sync");
     } else {
-        Serial.println("[MQTT]  Failed to buffer result!");
+        Serial.println("[MQTT] ✗ Failed to buffer result!");
     }
 }
 
-bool MqttManager::publishResultInternal(String cmdType, String status, String resultJson) {
+bool MqttManager::publishResultInternal(String cmdType, String status, String resultJson,String cmdId) {
     String topic = "campus/probes/" + _probeId + "/result";
     
     DynamicJsonDocument doc(4096);
     doc["probe_id"] = _probeId;
     doc["command"] = cmdType;
     doc["status"] = status;
+    doc["command_id"] = cmdId;
     
     if (resultJson.length() > 0) {
         doc["result"] = serialized(resultJson.c_str());
@@ -156,9 +151,9 @@ bool MqttManager::publishResultInternal(String cmdType, String status, String re
     bool success = client.publish(topic.c_str(), output.c_str());
     
     if (success) {
-        Serial.printf("[MQTT] ✓ Published to: %s\n", topic.c_str());
+        Serial.printf("[MQTT] Published to: %s\n", topic.c_str());
     } else {
-        Serial.println("[MQTT] ❌ Publish failed");
+        Serial.println("[MQTT] Publish failed");
     }
     
     return success;
@@ -175,13 +170,13 @@ void MqttManager::syncBufferedResults() {
     int synced = 0;
     int failed = 0;
     
-    while (ResultBuffer::hasBufferedResults() && synced < 5) { // Max 5 per sync
+    while (ResultBuffer::hasBufferedResults() && synced < 5) {
         BufferedResult result = ResultBuffer::getNextResult();
         
         Serial.printf("[MQTT] ║ Syncing: %s (status: %s)\n", 
                       result.cmdType.c_str(), result.status.c_str());
         
-        if (publishResultInternal(result.cmdType, result.status, result.resultJson)) {
+        if (publishResultInternal(result.cmdType, result.status, result.resultJson,result.cmdId)) {
             ResultBuffer::clearResult();
             synced++;
             Serial.println("[MQTT] ║   ✓ Synced successfully");
@@ -212,8 +207,45 @@ void MqttManager::clearCommand() {
 }
 
 void MqttManager::syncOfflineLogs() {
-    if (StorageManager::getBufferSize() == 0) return;
+    if (StorageManager::getBufferSize() == 0) {
+        Serial.println("[MQTT] No offline logs to sync");
+        return;
+    }
+    
     Serial.println("[MQTT] Syncing offline logs...");
+    
+    String buffer = StorageManager::readBuffer();
+    if (buffer.length() == 0) {
+        Serial.println("[MQTT] Buffer empty after read");
+        StorageManager::clearBuffer();
+        return;
+    }
+    
+    int synced = 0;
+    int failed = 0;
+    int start = 0;
+    
+    while (start < buffer.length()) {
+        int end = buffer.indexOf('\n', start);
+        if (end == -1) end = buffer.length();
+        
+        String line = buffer.substring(start, end);
+        line.trim();
+        
+        if (line.length() > 2) {
+            if (client.publish("campus/probes/telemetry", line.c_str())) {
+                synced++;
+            } else {
+                failed++;
+            }
+            delay(50);
+        }
+        
+        start = end + 1;
+    }
+    
+    StorageManager::clearBuffer();
+    Serial.printf("[MQTT] Offline sync complete: %d synced, %d failed\n", synced, failed);
 }
 
 bool MqttManager::publishTelemetry(String payload) {

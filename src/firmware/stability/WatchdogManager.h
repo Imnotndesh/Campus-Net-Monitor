@@ -7,7 +7,7 @@
 class WatchdogManager {
 public:
     static void begin(uint32_t timeoutSeconds);
-    static void reset(); // "Kick" the dog to prevent reset
+    static void reset();
 };
 
 #endif

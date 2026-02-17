@@ -83,26 +83,23 @@ void startPortalMode() {
 }
 
 void startRunningMode() {
-    Serial.println("[SYSTEM] ✓ Transitioning to RUNNING state");
-    
     TimeManager::begin();
     TimeManager::sync();
 
-    MqttManager::setup(activeCfg.mqttServer, activeCfg.mqttPort, activeCfg.probe_id);
-
-    Serial.printf("[SYSTEM] ✓ Probe ID: %s\n", activeCfg.probe_id);
-    Serial.printf("[SYSTEM] ✓ MQTT: %s:%d\n", activeCfg.mqttServer, activeCfg.mqttPort);
+    activeCfg = ConfigManager::load();
     
+    if (activeCfg.reportInterval > 1000) {
+        activeCfg.reportInterval = 60;
+        ConfigManager::save(activeCfg);
+    }
+    MqttManager::setup(activeCfg.mqttServer, activeCfg.mqttPort, activeCfg.probe_id);
     StatusLED::setStatus(STATUS_OK);
     currentState = RUNNING;
 }
 
 void handleRunningState() {
-    // 1. Connection Check
     if (!ConnectionManager::isConnected()) {
         StatusLED::setStatus(ERR_WIFI);
-        Serial.println("[SYSTEM] WiFi Lost. Reconnecting...");
-        
         WifiCredentials creds = StorageManager::loadWifiCredentials();
         if (!ConnectionManager::establishConnection(creds.ssid, creds.password)) {
             startPortalMode();
@@ -116,17 +113,26 @@ void handleRunningState() {
     } else {
         StatusLED::setStatus(ERR_MQTT);
     }
-    static unsigned long lastReport = 0;
-    if (millis() - lastReport > (activeCfg.reportInterval * 1000)) {
+
+    if (MqttManager::hasPendingCommand()) {
+    Serial.println("[DEBUG] *** PENDING COMMAND DETECTED ***");
+    PendingCommand cmd = MqttManager::getNextCommand();
+    Serial.printf("[DEBUG] Processing command: type=%s, id=%s\n", cmd.type.c_str(), cmd.id.c_str());
+    CommandHandler::process(cmd);
+    MqttManager::clearCommand();
+    Serial.println("[DEBUG] *** COMMAND PROCESSING COMPLETE ***");
+    }
+    
+    static unsigned long lastReport = millis();
+    unsigned long elapsed = millis() - lastReport;
+    unsigned long interval = activeCfg.reportInterval * 1000;
+    
+    if (elapsed > interval) {
         lastReport = millis();
         performTelemetry();
     }
-
-    if (MqttManager::hasPendingCommand()) {
-         PendingCommand cmd = MqttManager::getNextCommand();
-         CommandHandler::process(cmd);
-         MqttManager::clearCommand();
-    }
+    
+    delay(100);
 }
 
 void performTelemetry() {

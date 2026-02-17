@@ -106,13 +106,12 @@ void StorageManager::clearBuffer() {
 }
 
 String StorageManager::readBuffer() {
-    if (!LittleFS.exists("/offline_logs.json")) {
+    if (!LittleFS.exists("/buffer.json")) {
         return "";
     }
 
-    File file = LittleFS.open("/offline_logs.json", FILE_READ);
+    File file = LittleFS.open("/buffer.json", FILE_READ);
     if (!file) {
-        Serial.println("[STORAGE] Failed to open logs for reading");
         return "";
     }
 

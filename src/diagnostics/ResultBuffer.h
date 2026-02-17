@@ -12,6 +12,7 @@ struct BufferedResult {
     String cmdType;
     String status;
     String resultJson;
+    String cmdId;
     unsigned long timestamp;
 };
 
