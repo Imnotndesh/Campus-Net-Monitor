@@ -190,16 +190,16 @@ void FleetManager::handleFleetStatus(JsonDocument& payload, String commandId) {
 void FleetManager::handleFleetSchedule(JsonDocument& payload, String commandId) {
     if (payload.containsKey("operation") && payload.containsKey("schedule")) {
         String operation = payload["operation"].as<String>();
-        String schedule = payload["schedule"].as<String>();
-        
+        // Pass the nested JsonObject directly, not re-serialized
+        JsonVariant scheduleVar = payload["schedule"];
         DynamicJsonDocument scheduleDoc(512);
-        deserializeJson(scheduleDoc, schedule);
+        scheduleDoc.set(scheduleVar);
         
         if (FleetScheduler::scheduleOperation(operation, scheduleDoc)) {
-            MqttManager::publishCommandResult("fleet_schedule", "completed", 
+            MqttManager::publishCommandResult("fleet_schedule", "completed",
                 "{\"msg\":\"Operation scheduled\"}", commandId);
         } else {
-            MqttManager::publishCommandResult("fleet_schedule", "failed", 
+            MqttManager::publishCommandResult("fleet_schedule", "failed",
                 "{\"error\":\"Invalid schedule\"}", commandId);
         }
     }

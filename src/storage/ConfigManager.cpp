@@ -4,8 +4,12 @@ Preferences ConfigManager::prefs;
 
 void ConfigManager::begin() {
     prefs.begin("campus_config", false);
+        Preferences fleetPrefs;
+    fleetPrefs.begin("fleet", false);
+    fleetPrefs.end();
 }
-
+bool ConfigManager::_fleetManagedCache = false;
+bool ConfigManager::_fleetCacheValid = false;
 String ConfigManager::getProbeId() { return prefs.getString("probe_id", "PROBE-DEFAULT"); }
 String ConfigManager::getWifiSSID() { return prefs.getString("wifi_ssid", ""); }
 String ConfigManager::getWifiPassword() { return prefs.getString("wifi_pass", ""); }
@@ -134,127 +138,184 @@ bool ConfigManager::isConfigured() {
             getMqttBroker().length() > 0);
 }
 
+// Replace all fleet-related methods in ConfigManager.cpp with these versions:
+
 void ConfigManager::setFleetGroups(String groups) {
-    prefs.begin("fleet", false);
-    prefs.putString("groups", groups);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {  // false = read/write mode
+        fleetPrefs.putString("groups", groups);
+        fleetPrefs.end();
+    } else {
+        Serial.println("[CONFIG] Failed to open fleet namespace for writing");
+    }
 }
 
 String ConfigManager::getFleetGroups() {
-    prefs.begin("fleet", true);
-    String groups = prefs.getString("groups", "");
-    prefs.end();
+    Preferences fleetPrefs;
+    String groups = "";
+    if (fleetPrefs.begin("fleet", true)) {  // true = read-only mode
+        groups = fleetPrefs.getString("groups", "");
+        fleetPrefs.end();
+    }
     return groups;
 }
 
 void ConfigManager::setFleetLocation(String location) {
-    prefs.begin("fleet", false);
-    prefs.putString("location", location);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.putString("location", location);
+        fleetPrefs.end();
+    }
 }
 
 String ConfigManager::getFleetLocation() {
-    prefs.begin("fleet", true);
-    String location = prefs.getString("location", "");
-    prefs.end();
+    Preferences fleetPrefs;
+    String location = "";
+    if (fleetPrefs.begin("fleet", true)) {
+        location = fleetPrefs.getString("location", "");
+        fleetPrefs.end();
+    }
     return location;
 }
 
 void ConfigManager::setFleetTags(String tags) {
-    prefs.begin("fleet", false);
-    prefs.putString("tags", tags);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.putString("tags", tags);
+        fleetPrefs.end();
+    }
 }
 
 String ConfigManager::getFleetTags() {
-    prefs.begin("fleet", true);
-    String tags = prefs.getString("tags", "{}");
-    prefs.end();
+    Preferences fleetPrefs;
+    String tags = "{}";
+    if (fleetPrefs.begin("fleet", true)) {
+        tags = fleetPrefs.getString("tags", "{}");
+        fleetPrefs.end();
+    }
     return tags;
 }
 
 void ConfigManager::setFleetManaged(bool managed) {
-    prefs.begin("fleet", false);
-    prefs.putBool("managed", managed);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.putBool("managed", managed);
+        fleetPrefs.end();
+    }
+    _fleetManagedCache = managed;
+    _fleetCacheValid = true;
 }
 
 bool ConfigManager::isFleetManaged() {
-    prefs.begin("fleet", true);
-    bool managed = prefs.getBool("managed", false);
-    prefs.end();
-    return managed;
+    if (!_fleetCacheValid) {
+        Preferences fleetPrefs;
+        if (fleetPrefs.begin("fleet", true)) {
+            _fleetManagedCache = fleetPrefs.getBool("managed", false);
+            fleetPrefs.end();
+        }
+        _fleetCacheValid = true;
+    }
+    return _fleetManagedCache;
 }
 
 void ConfigManager::setMaintenanceWindow(String window) {
-    prefs.begin("fleet", false);
-    prefs.putString("maint_window", window);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.putString("maint_window", window);
+        fleetPrefs.end();
+    }
 }
 
 String ConfigManager::getMaintenanceWindow() {
-    prefs.begin("fleet", true);
-    String window = prefs.getString("maint_window", "");
-    prefs.end();
+    Preferences fleetPrefs;
+    String window = "";
+    if (fleetPrefs.begin("fleet", true)) {
+        window = fleetPrefs.getString("maint_window", "");
+        fleetPrefs.end();
+    }
     return window;
 }
 
 void ConfigManager::setFleetConfigVersion(int version) {
-    prefs.begin("fleet", false);
-    prefs.putInt("config_ver", version);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.putInt("config_ver", version);
+        fleetPrefs.end();
+    }
 }
 
 int ConfigManager::getFleetConfigVersion() {
-    prefs.begin("fleet", true);
-    int version = prefs.getInt("config_ver", 0);
-    prefs.end();
+    Preferences fleetPrefs;
+    int version = 0;
+    if (fleetPrefs.begin("fleet", true)) {
+        version = fleetPrefs.getInt("config_ver", 0);
+        fleetPrefs.end();
+    }
     return version;
 }
 
 void ConfigManager::incrementFleetCommandCount() {
-    prefs.begin("fleet", false);
-    int count = prefs.getInt("cmd_count", 0);
-    prefs.putInt("cmd_count", count + 1);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        int count = fleetPrefs.getInt("cmd_count", 0);
+        fleetPrefs.putInt("cmd_count", count + 1);
+        fleetPrefs.end();
+    }
 }
 
 int ConfigManager::getFleetCommandCount() {
-    prefs.begin("fleet", true);
-    int count = prefs.getInt("cmd_count", 0);
-    prefs.end();
+    Preferences fleetPrefs;
+    int count = 0;
+    if (fleetPrefs.begin("fleet", true)) {
+        count = fleetPrefs.getInt("cmd_count", 0);
+        fleetPrefs.end();
+    }
     return count;
 }
 
 void ConfigManager::setLastFleetCommand(String commandId) {
-    prefs.begin("fleet", false);
-    prefs.putString("last_cmd", commandId);
-    prefs.putULong64("last_cmd_time", millis());
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.putString("last_cmd", commandId);
+        fleetPrefs.putULong64("last_cmd_time", millis());
+        fleetPrefs.end();
+    }
 }
 
 String ConfigManager::getLastFleetCommand() {
-    prefs.begin("fleet", true);
-    String cmdId = prefs.getString("last_cmd", "");
-    prefs.end();
+    Preferences fleetPrefs;
+    String cmdId = "";
+    if (fleetPrefs.begin("fleet", true)) {
+        cmdId = fleetPrefs.getString("last_cmd", "");
+        fleetPrefs.end();
+    }
     return cmdId;
 }
 
 void ConfigManager::setFirmwareVersion(String version) {
-    prefs.begin("fleet", false);
-    prefs.putString("fw_version", version);
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.putString("fw_version", version);
+        fleetPrefs.end();
+    }
 }
 
 String ConfigManager::getFirmwareVersion() {
-    prefs.begin("fleet", true);
-    String version = prefs.getString("fw_version", "1.0.0");
-    prefs.end();
+    Preferences fleetPrefs;
+    String version = "1.0.0";
+    if (fleetPrefs.begin("fleet", true)) {
+        version = fleetPrefs.getString("fw_version", "1.0.0");
+        fleetPrefs.end();
+    }
     return version;
 }
 
 void ConfigManager::clearFleetState() {
-    prefs.begin("fleet", false);
-    prefs.clear();
-    prefs.end();
+    Preferences fleetPrefs;
+    if (fleetPrefs.begin("fleet", false)) {
+        fleetPrefs.clear();
+        fleetPrefs.end();
+    }
+    _fleetManagedCache = false;
+    _fleetCacheValid = true;
 }

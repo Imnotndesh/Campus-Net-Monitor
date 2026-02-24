@@ -1,4 +1,5 @@
 #include "FleetScheduler.h"
+#include <LittleFS.h>
 #include "../storage/StorageManager.h"
 #include "../storage/ConfigManager.h"
 #include "../comms/MqttManager.h"

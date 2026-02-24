@@ -53,7 +53,7 @@ void CommandHandler::process(PendingCommand cmd) {
 }
 
 void CommandHandler::handleDeepScan(PendingCommand cmd) {
-    MqttManager::publishCommandResult("deep_scan", "processing", cmd.id, "{\"msg\": \"Scan initiated\"}");
+    MqttManager::publishCommandResult("deep_scan", "processing", "{\"msg\": \"Scan initiated\"}", cmd.id);
     
     DynamicJsonDocument doc(2048);
     deserializeJson(doc, cmd.payload);
@@ -230,7 +230,7 @@ void CommandHandler::handleOTAUpdate(PendingCommand cmd) {
 
     OTAManager::setFinishCallback([](const char* cmdId) {
         String payload = "{\"msg\": \"OTA completed, rebooting...\"}";
-        MqttManager::publishCommandResult("ota_update", String(cmdId), "completed", payload);
+        MqttManager::publishCommandResult("ota_update", "completed", payload, String(cmdId));
     });
     bool success = OTAManager::performUpdate(url, cmd.id.c_str());
     

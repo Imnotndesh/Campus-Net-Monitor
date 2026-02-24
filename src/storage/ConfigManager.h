@@ -54,5 +54,7 @@ public:
     
 private:
     static Preferences prefs;
+    static bool _fleetManagedCache;
+    static bool _fleetCacheValid;
 };
 #endif
