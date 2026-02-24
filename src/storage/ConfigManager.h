@@ -1,4 +1,3 @@
-// ConfigManager.h
 #ifndef CONFIG_MANAGER_H
 #define CONFIG_MANAGER_H
 #include <Arduino.h>
@@ -33,7 +32,29 @@ public:
     static void setMqtt(String broker, int port, String user, String password);
     static void setProbeId(String newId);
     
+    static void setFleetGroups(String groups);
+    static String getFleetGroups();
+    static void setFleetLocation(String location);
+    static String getFleetLocation();
+    static void setFleetTags(String tags);
+    static String getFleetTags();
+    static void setFleetManaged(bool managed);
+    static bool isFleetManaged();
+    static void setMaintenanceWindow(String window);
+    static String getMaintenanceWindow();
+    static void setFleetConfigVersion(int version);
+    static int getFleetConfigVersion();
+    static void incrementFleetCommandCount();
+    static int getFleetCommandCount();
+    static void setLastFleetCommand(String commandId);
+    static String getLastFleetCommand();
+    static void clearFleetState();
+    static void setFirmwareVersion(String version);
+    static String getFirmwareVersion();
+    
 private:
     static Preferences prefs;
+    static bool _fleetManagedCache;
+    static bool _fleetCacheValid;
 };
 #endif
