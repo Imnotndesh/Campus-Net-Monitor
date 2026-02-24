@@ -7,7 +7,6 @@
 #include "../storage/StorageManager.h"
 #include "../diagnostics/ResultBuffer.h"
 
-// Structure to hold commands for the main loop to process
 struct PendingCommand {
     String type;
     String payload;
@@ -22,6 +21,7 @@ public:
     static bool publishTelemetry(String payload);
     
     static void publishCommandResult(String cmdType, String status, String resultPayload, String cmdId);  
+    static bool publishBroadcast(String topic, String payload);
 
     static bool hasPendingCommand();
     static PendingCommand getNextCommand();
@@ -30,12 +30,13 @@ public:
     static void syncBufferedResults();
     
     static bool isConnected();
-    static bool publishBroadcast(String topic, String payload);
+    static void subscribeToFleetTopics();
+    static bool isFleetTopic(String topic);
 
 private:
     static void callback(char* topic, byte* payload, unsigned int length);
     static bool reconnect();
-    static bool publishResultInternal(String cmdType, String status, String resultJson,String cmdId);
+    static bool publishResultInternal(String cmdType, String status, String resultJson, String cmdId);
     
     static WiFiClient espClient;
     static PubSubClient client;

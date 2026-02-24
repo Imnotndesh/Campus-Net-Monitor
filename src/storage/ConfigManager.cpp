@@ -133,3 +133,128 @@ bool ConfigManager::isConfigured() {
             getWifiPassword().length() > 0 && 
             getMqttBroker().length() > 0);
 }
+
+void ConfigManager::setFleetGroups(String groups) {
+    prefs.begin("fleet", false);
+    prefs.putString("groups", groups);
+    prefs.end();
+}
+
+String ConfigManager::getFleetGroups() {
+    prefs.begin("fleet", true);
+    String groups = prefs.getString("groups", "");
+    prefs.end();
+    return groups;
+}
+
+void ConfigManager::setFleetLocation(String location) {
+    prefs.begin("fleet", false);
+    prefs.putString("location", location);
+    prefs.end();
+}
+
+String ConfigManager::getFleetLocation() {
+    prefs.begin("fleet", true);
+    String location = prefs.getString("location", "");
+    prefs.end();
+    return location;
+}
+
+void ConfigManager::setFleetTags(String tags) {
+    prefs.begin("fleet", false);
+    prefs.putString("tags", tags);
+    prefs.end();
+}
+
+String ConfigManager::getFleetTags() {
+    prefs.begin("fleet", true);
+    String tags = prefs.getString("tags", "{}");
+    prefs.end();
+    return tags;
+}
+
+void ConfigManager::setFleetManaged(bool managed) {
+    prefs.begin("fleet", false);
+    prefs.putBool("managed", managed);
+    prefs.end();
+}
+
+bool ConfigManager::isFleetManaged() {
+    prefs.begin("fleet", true);
+    bool managed = prefs.getBool("managed", false);
+    prefs.end();
+    return managed;
+}
+
+void ConfigManager::setMaintenanceWindow(String window) {
+    prefs.begin("fleet", false);
+    prefs.putString("maint_window", window);
+    prefs.end();
+}
+
+String ConfigManager::getMaintenanceWindow() {
+    prefs.begin("fleet", true);
+    String window = prefs.getString("maint_window", "");
+    prefs.end();
+    return window;
+}
+
+void ConfigManager::setFleetConfigVersion(int version) {
+    prefs.begin("fleet", false);
+    prefs.putInt("config_ver", version);
+    prefs.end();
+}
+
+int ConfigManager::getFleetConfigVersion() {
+    prefs.begin("fleet", true);
+    int version = prefs.getInt("config_ver", 0);
+    prefs.end();
+    return version;
+}
+
+void ConfigManager::incrementFleetCommandCount() {
+    prefs.begin("fleet", false);
+    int count = prefs.getInt("cmd_count", 0);
+    prefs.putInt("cmd_count", count + 1);
+    prefs.end();
+}
+
+int ConfigManager::getFleetCommandCount() {
+    prefs.begin("fleet", true);
+    int count = prefs.getInt("cmd_count", 0);
+    prefs.end();
+    return count;
+}
+
+void ConfigManager::setLastFleetCommand(String commandId) {
+    prefs.begin("fleet", false);
+    prefs.putString("last_cmd", commandId);
+    prefs.putULong64("last_cmd_time", millis());
+    prefs.end();
+}
+
+String ConfigManager::getLastFleetCommand() {
+    prefs.begin("fleet", true);
+    String cmdId = prefs.getString("last_cmd", "");
+    prefs.end();
+    return cmdId;
+}
+
+void ConfigManager::setFirmwareVersion(String version) {
+    prefs.begin("fleet", false);
+    prefs.putString("fw_version", version);
+    prefs.end();
+}
+
+String ConfigManager::getFirmwareVersion() {
+    prefs.begin("fleet", true);
+    String version = prefs.getString("fw_version", "1.0.0");
+    prefs.end();
+    return version;
+}
+
+void ConfigManager::clearFleetState() {
+    prefs.begin("fleet", false);
+    prefs.clear();
+    prefs.end();
+}
