@@ -1,4 +1,4 @@
-// OTAManager.cpp
+// OTAManager.cpp - Enhanced version
 #include "OTAManager.h"
 
 void (*OTAManager::progressCallback)(int, int, const char*) = nullptr;
@@ -26,80 +26,114 @@ void OTAManager::setFinishCallback(void (*callback)(const char*)) {
 bool OTAManager::performUpdate(const char* url, const char* cmdId) {
     currentCmdId = String(cmdId);
     
+    // Pre-update checks
     if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[OTA] WiFi not connected");
         if (errorCallback) errorCallback(-1, currentCmdId.c_str());
         return false;
     }
 
+    Serial.printf("[OTA] Starting update from URL: %s\n", url);
     if (startCallback) startCallback(currentCmdId.c_str());
     
     HTTPClient http;
+    http.setTimeout(30000); // 30 second timeout for slow connections
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); // Follow redirects (common for CDN links)
+    
     http.begin(url);
     
     int httpCode = http.GET();
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[OTA] HTTP Failed: %d\n", httpCode);
-        if (errorCallback) errorCallback(httpCode, currentCmdId.c_str());
+        if (errorCallback) {
+            String errorMsg = "HTTP error: " + String(httpCode);
+            errorCallback(httpCode, currentCmdId.c_str());
+        }
         http.end();
         return false;
     }
 
-    int len = http.getSize();
-    bool canBegin = Update.begin(len);
-    if (!canBegin) {
-        Serial.println("[OTA] Not enough space");
+    int contentLength = http.getSize();
+    if (contentLength <= 0) {
+        Serial.println("[OTA] Invalid content length");
         if (errorCallback) errorCallback(-2, currentCmdId.c_str());
+        http.end();
+        return false;
+    }
+
+    if (!Update.begin(contentLength)) {
+        Serial.printf("[OTA] Not enough space. Need: %d, Available: %d\n", 
+                     contentLength, ESP.getFreeSketchSpace());
+        if (errorCallback) errorCallback(-3, currentCmdId.c_str());
         http.end();
         return false;
     }
 
     WiFiClient* stream = http.getStreamPtr();
     size_t written = 0;
-    uint8_t buff[128];
+    uint8_t buff[256];
     int lastProgress = -1;
+    unsigned long lastReport = 0;
 
-    while (http.connected() && (len > 0 || len == -1)) {
+    while (http.connected() && written < contentLength) {
         size_t size = stream->available();
         if (size) {
-            int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-            Update.write(buff, c);
-            written += c;
+            int bytesRead = stream->readBytes(buff, min(size, sizeof(buff)));
+            if (bytesRead > 0) {
+                Update.write(buff, bytesRead);
+                written += bytesRead;
 
-            if (len > 0) {
-                len -= c;
-                int progress = (written * 100) / (written + len);
-                if (progress != lastProgress && progressCallback) {
-                    progressCallback(written, written + len, currentCmdId.c_str());
+                int progress = (written * 100) / contentLength;
+                
+                unsigned long now = millis();
+                if (progress != lastProgress && progressCallback && (now - lastReport > 500)) {
+                    progressCallback(written, contentLength, currentCmdId.c_str());
                     lastProgress = progress;
+                    lastReport = now;
                 }
             }
         }
         delay(1);
+
+        if (millis() - lastReport > 30000) {
+            Serial.println("[OTA] Update timeout - no data received");
+            Update.abort();
+            if (errorCallback) errorCallback(-4, currentCmdId.c_str());
+            http.end();
+            return false;
+        }
     }
 
-    if (written != http.getSize()) {
-        Serial.printf("[OTA] Write Failed. Written: %d / %d\n", written, http.getSize());
-        if (errorCallback) errorCallback(-3, currentCmdId.c_str());
+    if (written != contentLength) {
+        Serial.printf("[OTA] Write incomplete. Written: %d / %d\n", written, contentLength);
+        Update.abort();
+        if (errorCallback) errorCallback(-5, currentCmdId.c_str());
         http.end();
         return false;
     }
 
     if (!Update.end()) {
-        Serial.println("[OTA] End Failed");
-        if (errorCallback) errorCallback(-4, currentCmdId.c_str());
+        Serial.printf("[OTA] End Failed. Error: %s\n", Update.errorString());
+        if (errorCallback) {
+            errorCallback(Update.getError(), currentCmdId.c_str());
+        }
         http.end();
         return false;
     }
 
     if (!Update.isFinished()) {
         Serial.println("[OTA] Update not finished");
-        if (errorCallback) errorCallback(-5, currentCmdId.c_str());
+        if (errorCallback) errorCallback(-6, currentCmdId.c_str());
         http.end();
         return false;
     }
 
-    Serial.println("[OTA] Update Success!");
+    Serial.println("[OTA] Update Success! Rebooting in 2 seconds...");
     if (finishCallback) finishCallback(currentCmdId.c_str());
     http.end();
+    
+    delay(2000);
+    ESP.restart();
+    
     return true;
 }
