@@ -9,6 +9,7 @@
 #include "../firmware/OTAManager.h"
 #include "../packaging/JsonPackager.h"
 #include "MqttManager.h"
+#include "../fleet/FleetManager.h"
 
 class CommandHandler {
 public:

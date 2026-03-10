@@ -12,8 +12,20 @@ void CommandHandler::begin() {
 
 void CommandHandler::process(PendingCommand cmd) {
     Serial.printf("[CMD] ║ PROCESSING: %s (ID: %s)\n", cmd.type.c_str(), cmd.id.c_str());
+if (cmd.type.startsWith("fleet_")) {
+        DynamicJsonDocument doc(2048);
+        if (cmd.payload.length() > 0) {
+            deserializeJson(doc, cmd.payload);
+        }
 
-    if (cmd.type == "deep_scan") {
+        bool handled = FleetManager::processFleetCommand(cmd.type, doc, cmd.id);
+
+        if (!handled) {
+            MqttManager::publishCommandResult(cmd.type, "failed", "{\"error\": \"Fleet command rejected (not managed or unknown)\"}", cmd.id);
+        }
+        return; 
+    }
+    else if (cmd.type == "deep_scan") {
         handleDeepScan(cmd);
     } 
     else if (cmd.type == "config_update") {
