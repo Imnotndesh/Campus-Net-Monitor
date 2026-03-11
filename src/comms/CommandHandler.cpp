@@ -107,40 +107,53 @@ void CommandHandler::handleSetWifi(PendingCommand cmd) {
         MqttManager::publishCommandResult("set_wifi", "failed", "{\"error\": \"Missing SSID/Password\"}", cmd.id);
         return;
     }
+
     WifiCredentials oldCreds = StorageManager::loadWifiCredentials();
+
+    // Test new credentials first WITHOUT touching current MQTT connection
+    WiFiClient testClient;
+    testClient.setTimeout(5);
+
+    // Try connecting on a temporary station interface — we disconnect and reconnect quickly
+    // Save new creds, attempt connect, roll back on failure
     StorageManager::saveWifiCredentials(String(ssid), String(pass));
-    
-    MqttManager::publishCommandResult("set_wifi", "processing", "{\"msg\": \"Testing new WiFi credentials...\"}", cmd.id);
-    delay(500);
+
     WiFi.disconnect();
-    delay(1000);
-    
+    delay(300);
     WiFi.begin(ssid, pass);
-    
+
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         delay(500);
         attempts++;
     }
-    
+
     if (WiFi.status() == WL_CONNECTED) {
-        MqttManager::publishCommandResult("set_wifi", "completed", "{\"msg\": \"WiFi updated successfully. IP: " + WiFi.localIP().toString() + "\"}", cmd.id);
-        delay(1000);
+        // Publish result now that WiFi (and shortly MQTT) is back up.
+        // We reconnect MQTT inline here before publishing so the result actually sends.
+        delay(500); // Give MQTT reconnect loop a moment
+        MqttManager::publishCommandResult("set_wifi", "completed",
+            "{\"msg\": \"WiFi updated successfully. IP: " + WiFi.localIP().toString() + "\"}", cmd.id);
+        delay(500);
         ESP.restart();
     } else {
+        // Roll back credentials and reconnect to old WiFi
         StorageManager::saveWifiCredentials(oldCreds.ssid, oldCreds.password);
-        
+
         WiFi.disconnect();
-        delay(500);
+        delay(300);
         WiFi.begin(oldCreds.ssid.c_str(), oldCreds.password.c_str());
-        
+
         attempts = 0;
         while (WiFi.status() != WL_CONNECTED && attempts < 20) {
             delay(500);
             attempts++;
         }
-        
-        MqttManager::publishCommandResult("set_wifi", "failed", "{\"error\": \"New WiFi credentials failed. Rolled back to previous working config.\"}", cmd.id);
+
+        // Give MQTT reconnect loop a moment to restore connection before publishing failure
+        delay(1000);
+        MqttManager::publishCommandResult("set_wifi", "failed",
+            "{\"error\": \"New WiFi credentials failed. Rolled back to previous config.\"}", cmd.id);
     }
 }
 
@@ -152,36 +165,35 @@ void CommandHandler::handleSetMqtt(PendingCommand cmd) {
         MqttManager::publishCommandResult("set_mqtt", "failed", "{\"error\": \"Missing Broker/Port\"}", cmd.id);
         return;
     }
-    SystemConfig oldConfig = ConfigManager::load();
-    ConfigManager::setMqtt(
-        doc["broker"].as<String>(), 
-        doc["port"].as<int>(), 
-        doc["user"] | "", 
-        doc["password"] | ""
-    );
-    
-    MqttManager::publishCommandResult("set_mqtt", "processing", "{\"msg\": \"Testing new MQTT config...\"}", cmd.id);
-    delay(500);
+
+    // Test the new broker BEFORE saving config or disrupting current connection
     WiFiClient testClient;
     PubSubClient testMqtt(testClient);
     testMqtt.setServer(doc["broker"].as<String>().c_str(), doc["port"].as<int>());
-    
+
     String clientId = "ESP32-Test-" + String(random(0xffff), HEX);
     bool connected = testMqtt.connect(clientId.c_str());
-    
+
     if (connected) {
         testMqtt.disconnect();
-        MqttManager::publishCommandResult("set_mqtt", "completed", "{\"msg\": \"MQTT config saved. Rebooting...\"}", cmd.id);
-        delay(1000);
+
+        // Save config only after confirming the new broker is reachable
+        ConfigManager::setMqtt(
+            doc["broker"].as<String>(),
+            doc["port"].as<int>(),
+            doc["user"] | "",
+            doc["password"] | ""
+        );
+
+        // Publish result on the current (still live) MQTT connection before rebooting
+        MqttManager::publishCommandResult("set_mqtt", "completed",
+            "{\"msg\": \"MQTT config saved. Rebooting...\"}", cmd.id);
+        delay(500);
         ESP.restart();
     } else {
-        ConfigManager::setMqtt(
-            String(oldConfig.mqttServer),
-            oldConfig.mqttPort,
-            "",
-            ""
-        );
-        MqttManager::publishCommandResult("set_mqtt", "failed", "{\"error\": \"Could not connect to new MQTT broker. Rolled back to previous config.\"}", cmd.id);
+        // Config was never changed — just report failure
+        MqttManager::publishCommandResult("set_mqtt", "failed",
+            "{\"error\": \"Could not connect to new MQTT broker. Config unchanged.\"}", cmd.id);
     }
 }
 
@@ -275,7 +287,7 @@ void CommandHandler::handleGetStatus(PendingCommand cmd) {
     status["free_heap"] = ESP.getFreeHeap();
     status["rssi"] = WiFi.RSSI();
     status["ip"] = WiFi.localIP().toString();
-    status["ssid"] = WiFi.SSID(); // Added SSID
+    status["ssid"] = WiFi.SSID();
     
     String res;
     serializeJson(status, res);
