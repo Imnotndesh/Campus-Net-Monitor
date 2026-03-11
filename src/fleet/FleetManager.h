@@ -36,6 +36,7 @@ private:
     static void handleFleetDeepScan(JsonDocument& payload, String commandId);
     static void handleFleetReboot(JsonDocument& payload, String commandId);
     static void handleFleetFactoryReset(JsonDocument& payload, String commandId);
+    static void handleFleetCancel(JsonDocument& payload, String commandId);
     
     static void subscribeToFleetTopics();
 };

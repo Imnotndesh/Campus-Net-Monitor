@@ -76,6 +76,9 @@ bool FleetManager::processFleetCommand(String command, JsonDocument& payload, St
     else if (command == "fleet_factory_reset") {
         handleFleetFactoryReset(payload, commandId);
     }
+    else if (command == "fleet_cancel") {
+        handleFleetCancel(payload, commandId);
+    }
     else if (command == "fleet_enroll") {
         ConfigManager::setFleetManaged(true);
         
@@ -112,21 +115,139 @@ bool FleetManager::processFleetCommand(String command, JsonDocument& payload, St
 }
 
 void FleetManager::handleFleetConfig(JsonDocument& payload, String commandId) {
-    if (payload.containsKey("config")) {
-        String configJson;
-        serializeJson(payload["config"], configJson);
-        
-        if (ConfigManager::updateFromJSON(configJson)) {
-            if (payload.containsKey("version")) {
-                ConfigManager::setFleetConfigVersion(payload["version"]);
-            }
-            
-            MqttManager::publishCommandResult("fleet_config", "completed", 
-                "{\"msg\":\"Fleet config applied\"}", commandId);
-        } else {
-            MqttManager::publishCommandResult("fleet_config", "failed", 
-                "{\"error\":\"Invalid config\"}", commandId);
+    if (!payload.containsKey("config")) {
+        MqttManager::publishCommandResult("fleet_config", "failed",
+            "{\"error\":\"Missing config\"}", commandId);
+        return;
+    }
+
+    JsonObject config = payload["config"].as<JsonObject>();
+    
+    // --- Step 1: Validate the config structure ---
+    if (config.containsKey("wifi")) {
+        JsonObject wifi = config["wifi"];
+        if (!wifi["ssid"].is<String>() || !wifi["password"].is<String>() ||
+            wifi["ssid"].as<String>().length() == 0 || wifi["password"].as<String>().length() == 0) {
+            MqttManager::publishCommandResult("fleet_config", "failed",
+                "{\"error\":\"Invalid WiFi: ssid and password required\"}", commandId);
+            return;
         }
+    }
+    if (config.containsKey("mqtt")) {
+        JsonObject mqtt = config["mqtt"];
+        if (!mqtt["broker"].is<String>() || mqtt["broker"].as<String>().length() == 0) {
+            MqttManager::publishCommandResult("fleet_config", "failed",
+                "{\"error\":\"Invalid MQTT: broker required\"}", commandId);
+            return;
+        }
+    }
+    WifiCredentials oldWifi = StorageManager::loadWifiCredentials();
+    bool wifiChanged = config.containsKey("wifi");
+    bool mqttChanged = config.containsKey("mqtt");
+    if (wifiChanged) {
+        JsonObject wifi = config["wifi"];
+        String newSSID = wifi["ssid"].as<String>();
+        String newPass = wifi["password"].as<String>();
+        StorageManager::saveWifiCredentials(newSSID, newPass);
+        WiFi.disconnect();
+        delay(300);
+        WiFi.begin(newSSID.c_str(), newPass.c_str());
+
+        int attempts = 0;
+        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+            delay(500);
+            attempts++;
+        }
+
+        if (WiFi.status() != WL_CONNECTED) {
+            StorageManager::saveWifiCredentials(oldWifi.ssid, oldWifi.password);
+            WiFi.disconnect();
+            WiFi.begin(oldWifi.ssid.c_str(), oldWifi.password.c_str());
+            MqttManager::publishCommandResult("fleet_config", "failed",
+                "{\"error\":\"WiFi connection test failed\"}", commandId);
+            return;
+        }
+    }
+    if (mqttChanged) {
+        JsonObject mqtt = config["mqtt"];
+        String broker = mqtt["broker"].as<String>();
+        int port = mqtt["port"] | 1883;
+        String user = mqtt["user"] | "";
+        String pass = mqtt["password"] | "";
+
+        WiFiClient testClient;
+        PubSubClient testMqtt(testClient);
+        testMqtt.setServer(broker.c_str(), port);
+        String clientId = "ESP32-Test-" + String(random(0xffff), HEX);
+        bool connected = testMqtt.connect(clientId.c_str(), user.c_str(), pass.c_str());
+
+        if (!connected) {
+            if (wifiChanged) {
+                StorageManager::saveWifiCredentials(oldWifi.ssid, oldWifi.password);
+                WiFi.disconnect();
+                WiFi.begin(oldWifi.ssid.c_str(), oldWifi.password.c_str());
+            }
+            MqttManager::publishCommandResult("fleet_config", "failed",
+                "{\"error\":\"MQTT connection test failed\"}", commandId);
+            return;
+        }
+        testMqtt.disconnect();
+    }
+
+    if (mqttChanged) {
+        JsonObject mqtt = config["mqtt"];
+        ConfigManager::setMqtt(
+            mqtt["broker"].as<String>(),
+            mqtt["port"] | 1883,
+            mqtt["user"] | "",
+            mqtt["password"] | ""
+        );
+    }
+
+    DynamicJsonDocument filteredDoc(1024);
+    if (config.containsKey("location")) filteredDoc["location"] = config["location"];
+    if (config.containsKey("groups")) filteredDoc["groups"] = config["groups"];
+    if (config.containsKey("tags")) filteredDoc["tags"] = config["tags"];
+    if (config.containsKey("report_interval")) filteredDoc["report_interval"] = config["report_interval"];
+
+
+    String filteredJson;
+    serializeJson(filteredDoc, filteredJson);
+    ConfigManager::updateFromJSON(filteredJson);
+    if (payload.containsKey("version")) {
+        ConfigManager::setFleetConfigVersion(payload["version"]);
+    }
+
+    MqttManager::publishCommandResult("fleet_config", "completed",
+        "{\"msg\":\"Fleet config applied and tested\"}", commandId);
+}
+void FleetManager::handleFleetCancel(JsonDocument& payload, String commandId) {
+    if (!payload.containsKey("cancelled_command_id")) {
+        MqttManager::publishCommandResult("fleet_cancel", "failed",
+            "{\"error\":\"Missing cancelled_command_id\"}", commandId);
+        return;
+    }
+
+    String cancelledId = payload["cancelled_command_id"].as<String>();
+    Serial.printf("[FLEET] Processing cancel for command: %s\n", cancelledId.c_str());
+
+    bool aborted = false;
+
+    // Check OTA update
+    if (OTAManager::isOngoing() && OTAManager::getCurrentCommandId() == cancelledId) {
+        OTAManager::abort();
+        // Publish cancellation result for the original command
+        MqttManager::publishCommandResult("fleet_ota", "cancelled",
+            "{\"msg\":\"OTA update cancelled by user\"}", cancelledId);
+        aborted = true;
+    }
+
+    if (aborted) {
+        MqttManager::publishCommandResult("fleet_cancel", "completed",
+            "{\"msg\":\"Cancellation processed successfully\"}", commandId);
+    } else {
+        MqttManager::publishCommandResult("fleet_cancel", "completed",
+            "{\"msg\":\"No matching ongoing operation found\"}", commandId);
     }
 }
 

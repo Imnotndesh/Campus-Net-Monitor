@@ -14,6 +14,11 @@ public:
     static void setErrorCallback(void (*callback)(int, const char*));
     static void setStartCallback(void (*callback)(const char*));
     static void setFinishCallback(void (*callback)(const char*));
+    
+    // New methods for cancellation and tracking
+    static bool isOngoing();
+    static String getCurrentCommandId();
+    static void abort();
 
 private:
     static void (*progressCallback)(int current, int total, const char* cmdId);
@@ -21,6 +26,7 @@ private:
     static void (*startCallback)(const char* cmdId);
     static void (*finishCallback)(const char* cmdId);
     static String currentCmdId;
+    static bool ongoing;  // true while an update is in progress
 };
 
 #endif

@@ -2,6 +2,7 @@
 #include <LittleFS.h>
 #include "../storage/StorageManager.h"
 #include "../storage/ConfigManager.h"
+#include "../comms/CommandHandler.h"
 #include "../comms/MqttManager.h"
 #include "../diagnostics/DiagnosticEngine.h"
 #include "../packaging/JsonPackager.h"
@@ -138,66 +139,11 @@ String FleetScheduler::getSchedulesJson() {
 
 void FleetScheduler::executeOperation(const ScheduledOperation& op) {
     Serial.printf("[FLEET] Executing scheduled operation: %s\n", op.type.c_str());
-    
-    DynamicJsonDocument result(1024);
-    result["scheduled_id"] = op.id;
-    result["type"] = op.type;
-    result["timestamp"] = TimeManager::getTimestamp();
-    result["epoch"] = TimeManager::getEpoch();
-    
-    if (op.type == "deep_scan") {
-        // Parse parameters
-        DynamicJsonDocument params(512);
-        if (op.parameters.length() > 0) {
-            deserializeJson(params, op.parameters);
-        }
-        
-        String target = params["target"] | "8.8.8.8";
-        EnhancedMetrics em = DiagnosticEngine::performDeepAnalysis(target.c_str());
-        String probeId = String(ConfigManager::getProbeId());
-        String payload = JsonPackager::serializeEnhanced(em, probeId);
-        
-        MqttManager::publishBroadcast("campus/fleet/scheduled/deep_scan", payload);
-        
-        WifiCredentials creds = StorageManager::loadWifiCredentials();
-        WiFi.begin(creds.ssid.c_str(), creds.password.c_str());
-    }
-    else if (op.type == "shutdown") {
-        result["msg"] = "Entering deep sleep";
-        String payload;
-        serializeJson(result, payload);
-        
-        MqttManager::publishBroadcast("campus/fleet/scheduled/shutdown", payload);
-        delay(1000);
-        esp_deep_sleep_start();
-    }
-    else if (op.type == "reboot") {
-        result["msg"] = "Rebooting";
-        String payload;
-        serializeJson(result, payload);
-        
-        MqttManager::publishBroadcast("campus/fleet/scheduled/reboot", payload);
-        delay(1000);
-        ESP.restart();
-    }
-    else if (op.type == "report_status") {
-        DynamicJsonDocument status(256);
-        status["probe_id"] = ConfigManager::getProbeId();
-        status["uptime"] = millis() / 1000;
-        status["rssi"] = WiFi.RSSI();
-        status["timestamp"] = TimeManager::getTimestamp();
-        
-        String payload;
-        serializeJson(status, payload);
-        MqttManager::publishBroadcast("campus/fleet/scheduled/status", payload);
-    }
-    else if (op.type == "light_scan") {
-        NetworkMetrics m = DiagnosticEngine::performFullTest("8.8.8.8");
-        String probeId = String(ConfigManager::getProbeId());
-        String payload = JsonPackager::serializeLight(m, probeId);
-        
-        MqttManager::publishBroadcast("campus/fleet/scheduled/light_scan", payload);
-    }
+    PendingCommand cmd;
+    cmd.type = op.type;
+    cmd.id = op.id;
+    cmd.payload = op.parameters;
+    CommandHandler::process(cmd);
 }
 
 time_t FleetScheduler::parseScheduleTime(JsonDocument& schedule) {

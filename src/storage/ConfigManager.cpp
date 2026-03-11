@@ -93,52 +93,80 @@ void ConfigManager::save(SystemConfig config) {
     prefs.putInt("report_interval", config.reportInterval);
 }
 
-bool ConfigManager::updateFromJSON(String json) {
+// In ConfigManager.cpp
+bool ConfigManager::updateFromJSON(const String& json) {
     DynamicJsonDocument doc(1024);
     DeserializationError error = deserializeJson(doc, json);
-    
-    if(error) return false;
-    
-    if(doc.containsKey("probe_id")) {
+    if (error) return false;
+    if (doc.containsKey("probe_id")) {
         setProbeId(doc["probe_id"].as<String>());
     }
-    
-    if(doc.containsKey("wifi")) {
-        String ssid = doc["wifi"]["ssid"] | "";
-        String pass = doc["wifi"]["password"] | "";
-        if(ssid.length() > 0) setWifi(ssid, pass);
+    if (doc.containsKey("wifi")) {
+        JsonObject wifi = doc["wifi"];
+        if (!wifi["ssid"].is<String>() || !wifi["password"].is<String>()) {
+            return false;
+        }
+        String ssid = wifi["ssid"].as<String>();
+        String pass = wifi["password"].as<String>();
+        if (ssid.length() == 0 || pass.length() == 0) {
+            return false; // reject empty strings
+        }
+        setWifi(ssid, pass);
     }
-    
-    if(doc.containsKey("mqtt")) {
-        String broker = doc["mqtt"]["broker"] | "";
-        int port = doc["mqtt"]["port"] | 1883;
-        String user = doc["mqtt"]["user"] | "";
-        String pass = doc["mqtt"]["password"] | "";
+    if (doc.containsKey("mqtt")) {
+        JsonObject mqtt = doc["mqtt"];
+        if (!mqtt["broker"].is<String>() || mqtt["broker"].as<String>().length() == 0) {
+            return false;
+        }
+        String broker = mqtt["broker"].as<String>();
+        int port = mqtt["port"] | 1883;
+        String user = mqtt["user"] | "";
+        String pass = mqtt["password"] | "";
         setMqtt(broker, port, user, pass);
     }
-    
-    if(doc.containsKey("telemetry_topic")) {
+
+    // --- Telemetry and command topics ---
+    if (doc.containsKey("telemetry_topic")) {
         prefs.putString("telemetry_topic", doc["telemetry_topic"].as<String>());
     }
-    
-    if(doc.containsKey("cmd_topic")) {
+    if (doc.containsKey("cmd_topic")) {
         prefs.putString("cmd_topic", doc["cmd_topic"].as<String>());
     }
-    
-    if(doc.containsKey("report_interval")) {
+
+    // --- Report interval ---
+    if (doc.containsKey("report_interval")) {
         prefs.putInt("report_interval", doc["report_interval"].as<int>());
     }
-    
+
+    // --- Fleet Location ---
+    if (doc.containsKey("location")) {
+        setFleetLocation(doc["location"].as<String>());
+    }
+
+    // --- Fleet Groups (comma‑separated string) ---
+    if (doc.containsKey("groups")) {
+        String groups;
+        if (doc["groups"].is<JsonArray>()) {
+            JsonArray arr = doc["groups"].as<JsonArray>();
+            for (size_t i = 0; i < arr.size(); i++) {
+                if (i > 0) groups += ",";
+                groups += arr[i].as<String>();
+            }
+        } else {
+            groups = doc["groups"].as<String>();
+        }
+        setFleetGroups(groups);
+    }
+
+    // --- Fleet Tags (JSON object) ---
+    if (doc.containsKey("tags")) {
+        String tags;
+        serializeJson(doc["tags"], tags);
+        setFleetTags(tags);
+    }
+
     return true;
 }
-
-bool ConfigManager::isConfigured() {
-    return (getWifiSSID().length() > 0 && 
-            getWifiPassword().length() > 0 && 
-            getMqttBroker().length() > 0);
-}
-
-// Replace all fleet-related methods in ConfigManager.cpp with these versions:
 
 void ConfigManager::setFleetGroups(String groups) {
     Preferences fleetPrefs;

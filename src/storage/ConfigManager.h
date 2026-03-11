@@ -18,7 +18,7 @@ public:
     static void begin();
     static SystemConfig load();
     static void save(SystemConfig config);
-    static bool updateFromJSON(String json);
+    static bool updateFromJSON(const String& json);
     static bool isConfigured();
     static String getProbeId();
     static String getWifiSSID();

@@ -55,9 +55,8 @@ NetworkMetrics DiagnosticEngine::performFullTest(const char* targetHost) {
  * The caller MUST handle reconnection.
  */
 EnhancedMetrics DiagnosticEngine::performDeepAnalysis(const char* targetHost) {
-    Serial.println("\n[DEEP] ╔══════════════════════════════════════");
+    Serial.println("\n[DEEP] ══════════════════════════════════════");
     Serial.println("[DEEP] ║ DEEP SCAN INITIATED");
-    Serial.println("[DEEP] ╠══════════════════════════════════════");
     
     // PHASE 1: Gather metrics while connected
     Serial.println("[DEEP] ║ Phase 1: Gathering basic metrics...");
@@ -75,15 +74,15 @@ EnhancedMetrics DiagnosticEngine::performDeepAnalysis(const char* targetHost) {
     em.overlappingCount = basic.overlappingCount;
     em.congestion = basic.congestion;
     
-    Serial.printf("[DEEP] ║   ✓ RSSI: %d dBm\n", em.rssi);
-    Serial.printf("[DEEP] ║   ✓ Channel: %d\n", em.channel);
-    Serial.printf("[DEEP] ║   ✓ Neighbors: %d (Overlapping: %d)\n", 
+    Serial.printf("[DEEP] ║  RSSI: %d dBm\n", em.rssi);
+    Serial.printf("[DEEP] ║  Channel: %d\n", em.channel);
+    Serial.printf("[DEEP] ║  Neighbors: %d (Overlapping: %d)\n", 
                   em.neighborCount, em.overlappingCount);
     
     // PHASE 2: Measure TCP throughput (BEFORE promiscuous mode)
     Serial.println("[DEEP] ║ Phase 2: Measuring TCP throughput...");
     em.tcpThroughput = measureThroughput(targetHost);
-    Serial.printf("[DEEP] ║   ✓ Throughput: %d kbps\n", em.tcpThroughput);
+    Serial.printf("[DEEP] ║  Throughput: %d kbps\n", em.tcpThroughput);
     
     // Get PHY mode while still connected
     uint8_t protocol;
@@ -96,16 +95,16 @@ EnhancedMetrics DiagnosticEngine::performDeepAnalysis(const char* targetHost) {
     
     // PHASE 3: Radio environment analysis (will disconnect WiFi)
     Serial.println("[DEEP] ║ Phase 3: Radio environment capture...");
-    Serial.println("[DEEP] ║   ⚠ WARNING: Entering promiscuous mode");
-    Serial.println("[DEEP] ║   ⚠ WiFi will disconnect temporarily");
+    Serial.println("[DEEP] ║   WARNING: Entering promiscuous mode");
+    Serial.println("[DEEP] ║   WiFi will disconnect temporarily");
     
     SnifferStats s = SnifferEngine::analyzeChannel(em.channel, 2000);
     
     em.channelUtilization = s.channelUtilization;
-    Serial.printf("[DEEP] ║   ✓ Channel utilization: %.1f%%\n", em.channelUtilization);
-    Serial.printf("[DEEP] ║   ✓ Beacons: %d (Missed: %d)\n", 
+    Serial.printf("[DEEP] ║  Channel utilization: %.1f%%\n", em.channelUtilization);
+    Serial.printf("[DEEP] ║  Beacons: %d (Missed: %d)\n", 
                   s.beaconCount, s.missedBeacons);
-    Serial.printf("[DEEP] ║   ✓ Data packets: %d\n", s.dataPackets);
+    Serial.printf("[DEEP] ║  Data packets: %d\n", s.dataPackets);
     
     // PHASE 4: Calculate derived metrics
     Serial.println("[DEEP] ║ Phase 4: Calculating quality scores...");
@@ -118,14 +117,11 @@ EnhancedMetrics DiagnosticEngine::performDeepAnalysis(const char* targetHost) {
     quality -= (em.channelUtilization * 0.2);
     em.linkQuality = constrain(quality, 0, 100);
     
-    Serial.printf("[DEEP] ║   ✓ SNR: %.1f dB\n", em.snr);
-    Serial.printf("[DEEP] ║   ✓ Link Quality: %.1f/100\n", em.linkQuality);
-    Serial.println("[DEEP] ╠══════════════════════════════════════");
+    Serial.printf("[DEEP] ║  SNR: %.1f dB\n", em.snr);
+    Serial.printf("[DEEP] ║  Link Quality: %.1f/100\n", em.linkQuality);
     Serial.println("[DEEP] ║ DEEP SCAN COMPLETED");
-    Serial.println("[DEEP] ║ ⚠ WiFi is DISCONNECTED");
-    Serial.println("[DEEP] ║ ⚠ Caller must reconnect");
-    Serial.println("[DEEP] ╚══════════════════════════════════════\n");
-
+    Serial.println("[DEEP] ║ WiFi is DISCONNECTED");
+    Serial.println("[DEEP] ║ Caller must reconnect");
     return em;
 }
 
@@ -134,7 +130,7 @@ int DiagnosticEngine::measureThroughput(const char* host) {
     
     // Pre-check: Ensure WiFi is connected
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[DIAG] ❌ WiFi not connected, skipping throughput test");
+        Serial.println("[DIAG]  WiFi not connected, skipping throughput test");
         return 0;
     }
     
@@ -260,7 +256,7 @@ int DiagnosticEngine::measureThroughput(const char* host) {
     }
     
     int avgKbps = count > 0 ? sum / count : 0;
-    Serial.printf("[DIAG] ✓ Average throughput: %d kbps (%d/%d valid)\n", 
+    Serial.printf("[DIAG Average throughput: %d kbps (%d/%d valid)\n", 
                   avgKbps, validResults, NUM_ATTEMPTS);
     
     return avgKbps;

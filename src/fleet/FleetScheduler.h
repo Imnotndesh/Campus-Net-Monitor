@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <vector>
 #include "../packaging/TimeManager.h"
+#include "../comms/CommandHandler.h"
 
 struct ScheduledOperation {
     String id;

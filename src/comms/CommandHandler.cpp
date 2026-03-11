@@ -109,13 +109,8 @@ void CommandHandler::handleSetWifi(PendingCommand cmd) {
     }
 
     WifiCredentials oldCreds = StorageManager::loadWifiCredentials();
-
-    // Test new credentials first WITHOUT touching current MQTT connection
     WiFiClient testClient;
     testClient.setTimeout(5);
-
-    // Try connecting on a temporary station interface — we disconnect and reconnect quickly
-    // Save new creds, attempt connect, roll back on failure
     StorageManager::saveWifiCredentials(String(ssid), String(pass));
 
     WiFi.disconnect();
@@ -129,15 +124,12 @@ void CommandHandler::handleSetWifi(PendingCommand cmd) {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        // Publish result now that WiFi (and shortly MQTT) is back up.
-        // We reconnect MQTT inline here before publishing so the result actually sends.
-        delay(500); // Give MQTT reconnect loop a moment
+        delay(500);
         MqttManager::publishCommandResult("set_wifi", "completed",
             "{\"msg\": \"WiFi updated successfully. IP: " + WiFi.localIP().toString() + "\"}", cmd.id);
         delay(500);
         ESP.restart();
     } else {
-        // Roll back credentials and reconnect to old WiFi
         StorageManager::saveWifiCredentials(oldCreds.ssid, oldCreds.password);
 
         WiFi.disconnect();
