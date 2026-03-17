@@ -9,7 +9,7 @@
 
 std::vector<ScheduledOperation> FleetScheduler::operations;
 bool FleetScheduler::initialized = false;
-
+static bool factoryResetPending = false;
 void FleetScheduler::begin() {
     if (initialized) return;
     
@@ -19,8 +19,22 @@ void FleetScheduler::begin() {
     Serial.printf("[FLEET] Scheduler initialized with %d operations\n", operations.size());
 }
 
+void FleetScheduler::setFactoryResetPending(bool pending) {
+    factoryResetPending = pending;
+}
+
+bool FleetScheduler::isFactoryResetPending() {
+    return factoryResetPending;
+}
+
+
 void FleetScheduler::checkSchedule() {
     if (!initialized) return;
+    
+    // Do not execute any operation if a factory reset is pending
+    if (factoryResetPending) {
+        return;
+    }
     
     time_t now = time(nullptr);
     unsigned long nowMillis = millis();
@@ -38,23 +52,33 @@ void FleetScheduler::checkSchedule() {
         }
         
         if (shouldExecute) {
-            executeOperation(op);
-            op.executed = true;
-            changed = true;
-            
-            if (op.recurring) {
-                if (op.cronPattern.length() > 0) {
-                    if (op.cronPattern == "@daily") {
-                        op.executeAt += 86400;
-                    } else if (op.cronPattern == "@hourly") {
-                        op.executeAt += 3600;
-                    } else if (op.cronPattern == "@weekly") {
-                        op.executeAt += 604800;
-                    }
-                } else {
-                    op.executeAt += 86400;
+            if (op.type == "restart" || op.type == "reboot" || op.type == "shutdown" || op.type == "factory_reset") {
+                removeOperationFromFile(op.id);
+                op.executed = true;
+                changed = true;
+                if (changed) {
+                    saveSchedules();
                 }
-                op.executed = false;
+                executeOperation(op);
+            } else {
+                executeOperation(op);
+                op.executed = true;
+                changed = true;
+                
+                if (op.recurring) {
+                    if (op.cronPattern.length() > 0) {
+                        if (op.cronPattern == "@daily") {
+                            op.executeAt += 86400;
+                        } else if (op.cronPattern == "@hourly") {
+                            op.executeAt += 3600;
+                        } else if (op.cronPattern == "@weekly") {
+                            op.executeAt += 604800;
+                        }
+                    } else {
+                        op.executeAt += 86400;
+                    }
+                    op.executed = false;
+                }
             }
         }
     }
@@ -63,7 +87,36 @@ void FleetScheduler::checkSchedule() {
         saveSchedules();
     }
 }
+void FleetScheduler::removeOperationFromFile(String id) {
+    File file = LittleFS.open("/schedules.json", "r");
+    if (!file) return;
 
+    DynamicJsonDocument doc(4096);
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
+    if (error) return;
+
+    JsonArray arr = doc.as<JsonArray>();
+    bool removed = false;
+    for (size_t i = 0; i < arr.size(); i++) {
+        if (arr[i]["id"] == id) {
+            arr.remove(i);
+            removed = true;
+            break;
+        }
+    }
+
+    if (removed) {
+        file = LittleFS.open("/schedules.json", "w");
+        if (file) {
+            serializeJson(doc, file);
+            file.close();
+            delay(10);
+            Serial.printf("[FLEET] Removed scheduled operation %s from file\n", id.c_str());
+        }
+    }
+}
 bool FleetScheduler::scheduleOperation(String type, JsonDocument& schedule) {
     ScheduledOperation op;
     op.id = String(millis(), HEX) + String(random(1000, 9999));

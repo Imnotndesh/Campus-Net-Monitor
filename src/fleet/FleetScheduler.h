@@ -28,11 +28,13 @@ public:
     static bool cancelOperation(String id);
     static std::vector<ScheduledOperation> getPendingOperations();
     static String getSchedulesJson();
+    static void setFactoryResetPending(bool pending);
 
 private:
     static std::vector<ScheduledOperation> operations;
     static bool initialized;
-    
+    static bool isFactoryResetPending();
+    static void removeOperationFromFile(String id);
     static void loadSchedules();
     static void saveSchedules();
     static void executeOperation(const ScheduledOperation& op);

@@ -25,17 +25,26 @@ bool StorageManager::hasCredentials() {
     return (hasSsid && s.length() > 0);
 }
 void StorageManager::wipe() {
-    // 1. Clear WiFi Credentials & Failure Counts
     Preferences wifiPrefs;
     wifiPrefs.begin("wifi-creds", false);
     wifiPrefs.clear();
     wifiPrefs.end();
+
     Preferences configPrefs;
     configPrefs.begin("sys-cfg", false);
-    configPrefs.clear(); 
+    configPrefs.clear();
     configPrefs.end();
 
-    Serial.println("[STORAGE] NVS wiped including failure thresholds.");
+    Preferences fleetPrefs;
+    fleetPrefs.begin("fleet", false);
+    fleetPrefs.clear();
+    fleetPrefs.end();
+
+    LittleFS.remove("/schedules.json");
+    LittleFS.remove("/buffer.json");
+    LittleFS.remove("/result_buffer.json");
+
+    Serial.println("[STORAGE] Complete wipe performed including fleet data and schedules.");
 }
 
 WifiCredentials StorageManager::loadWifiCredentials() {

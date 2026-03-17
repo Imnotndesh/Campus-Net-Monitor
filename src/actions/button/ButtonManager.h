@@ -6,7 +6,7 @@
 class ButtonManager {
 public:
     static void begin(int pin);
-    static void update(); // Call in loop()
+    static void update();
 private:
     static int _pin;
     static int _clickCount;
