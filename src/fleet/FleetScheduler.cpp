@@ -30,16 +30,12 @@ bool FleetScheduler::isFactoryResetPending() {
 
 void FleetScheduler::checkSchedule() {
     if (!initialized) return;
-    
-    // Do not execute any operation if a factory reset is pending
-    if (factoryResetPending) {
-        return;
-    }
+    if (factoryResetPending) return;
     
     time_t now = time(nullptr);
     unsigned long nowMillis = millis();
     bool changed = false;
-    
+
     for (auto& op : operations) {
         if (op.executed) continue;
         
@@ -52,6 +48,7 @@ void FleetScheduler::checkSchedule() {
         }
         
         if (shouldExecute) {
+            Serial.printf("[SCHED] EXECUTING %s at time %lu\n", op.type.c_str(), now);
             if (op.type == "restart" || op.type == "reboot" || op.type == "shutdown" || op.type == "factory_reset") {
                 removeOperationFromFile(op.id);
                 op.executed = true;
@@ -182,6 +179,11 @@ String FleetScheduler::getSchedulesJson() {
             obj["execute_at"] = op.executeAt;
             obj["recurring"] = op.recurring;
             obj["cron"] = op.cronPattern;
+            if (op.parameters.length() > 0) {
+                DynamicJsonDocument paramsDoc(512);
+                deserializeJson(paramsDoc, op.parameters);
+                obj["parameters"] = paramsDoc;
+            }
         }
     }
     
@@ -189,7 +191,6 @@ String FleetScheduler::getSchedulesJson() {
     serializeJson(doc, output);
     return output;
 }
-
 void FleetScheduler::executeOperation(const ScheduledOperation& op) {
     Serial.printf("[FLEET] Executing scheduled operation: %s\n", op.type.c_str());
     PendingCommand cmd;

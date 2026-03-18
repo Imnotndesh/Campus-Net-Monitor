@@ -19,10 +19,12 @@ public:
     static void reportFleetStatus();
     static bool isWithinMaintenanceWindow();
     static void checkPendingOperations();
+    static void publishSchedules();
 
 private:
     static bool initialized;
     static unsigned long lastStatusReport;
+    static unsigned long lastScheduleBroadcast;
     static const unsigned long STATUS_INTERVAL = 300000;
     
     static void handleFleetConfig(JsonDocument& payload, String commandId);
@@ -37,6 +39,8 @@ private:
     static void handleFleetReboot(JsonDocument& payload, String commandId);
     static void handleFleetFactoryReset(JsonDocument& payload, String commandId);
     static void handleFleetCancel(JsonDocument& payload, String commandId);
+    static void handleGetSchedules(JsonDocument& payload, String commandId);
+    static void handleDeleteSchedule(JsonDocument& payload, String commandId);
     
     static void subscribeToFleetTopics();
 };

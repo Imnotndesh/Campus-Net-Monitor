@@ -4,6 +4,8 @@
 
 bool FleetManager::initialized = false;
 unsigned long FleetManager::lastStatusReport = 0;
+unsigned long FleetManager::lastScheduleBroadcast = 0;
+const unsigned long SCHEDULE_BROADCAST_INTERVAL = 600000;
 
 void FleetManager::begin() {
     if (initialized) return;
@@ -19,7 +21,12 @@ void FleetManager::begin() {
 }
 
 void FleetManager::loop() {
+    static bool firstloop = true;
     if (!initialized) return;
+    if (firstloop) {
+        publishSchedules();
+        firstloop = false;
+    }
     
     FleetScheduler::checkSchedule();
     
@@ -29,9 +36,21 @@ void FleetManager::loop() {
             lastStatusReport = now;
             reportFleetStatus();
         }
+        
+        if (now - lastScheduleBroadcast > SCHEDULE_BROADCAST_INTERVAL) {
+            lastScheduleBroadcast = now;
+            publishSchedules();
+        }
     }
 }
-
+void FleetManager::publishSchedules() {
+    String schedulesJson = FleetScheduler::getSchedulesJson();
+    String probeId = ConfigManager::getProbeId();
+    String topic = "campus/fleet/schedules/status/" + probeId;
+    
+    MqttManager::publishBroadcast(topic, schedulesJson);
+    Serial.println("[FLEET] Published schedules");
+}
 bool FleetManager::processFleetCommand(String command, JsonDocument& payload, String commandId) {
     if (!ConfigManager::isFleetManaged() && command != "fleet_enroll") {
         Serial.println("[FLEET] Not fleet managed, ignoring command");
@@ -48,6 +67,12 @@ bool FleetManager::processFleetCommand(String command, JsonDocument& payload, St
     }
     else if (command == "fleet_groups") {
         handleFleetGroups(payload, commandId);
+    }
+    else if (command == "get_schedules") {
+        handleGetSchedules(payload, commandId);
+    }
+    else if (command == "delete_schedule") {
+        handleDeleteSchedule(payload, commandId);
     }
     else if (command == "fleet_location") {
         handleFleetLocation(payload, commandId);
@@ -122,8 +147,6 @@ void FleetManager::handleFleetConfig(JsonDocument& payload, String commandId) {
     }
 
     JsonObject config = payload["config"].as<JsonObject>();
-    
-    // --- Step 1: Validate the config structure ---
     if (config.containsKey("wifi")) {
         JsonObject wifi = config["wifi"];
         if (!wifi["ssid"].is<String>() || !wifi["password"].is<String>() ||
@@ -311,7 +334,6 @@ void FleetManager::handleFleetStatus(JsonDocument& payload, String commandId) {
 void FleetManager::handleFleetSchedule(JsonDocument& payload, String commandId) {
     if (payload.containsKey("operation") && payload.containsKey("schedule")) {
         String operation = payload["operation"].as<String>();
-        // Pass the nested JsonObject directly, not re-serialized
         JsonVariant scheduleVar = payload["schedule"];
         DynamicJsonDocument scheduleDoc(512);
         scheduleDoc.set(scheduleVar);
@@ -319,6 +341,7 @@ void FleetManager::handleFleetSchedule(JsonDocument& payload, String commandId) 
         if (FleetScheduler::scheduleOperation(operation, scheduleDoc)) {
             MqttManager::publishCommandResult("fleet_schedule", "completed",
                 "{\"msg\":\"Operation scheduled\"}", commandId);
+                publishSchedules();
         } else {
             MqttManager::publishCommandResult("fleet_schedule", "failed",
                 "{\"error\":\"Invalid schedule\"}", commandId);
@@ -454,5 +477,27 @@ bool FleetManager::isWithinMaintenanceWindow() {
         return (currentMinutes >= startMinutes || currentMinutes < endMinutes);
     } else {
         return (currentMinutes >= startMinutes && currentMinutes < endMinutes);
+    }
+}
+void FleetManager::handleGetSchedules(JsonDocument& payload, String commandId) {
+    String schedulesJson = FleetScheduler::getSchedulesJson();
+    MqttManager::publishCommandResult("get_schedules", "completed", schedulesJson, commandId);
+}
+
+void FleetManager::handleDeleteSchedule(JsonDocument& payload, String commandId) {
+    if (!payload.containsKey("id")) {
+        MqttManager::publishCommandResult("delete_schedule", "failed", 
+            "{\"error\":\"Missing schedule id\"}", commandId);
+        return;
+    }
+    
+    String id = payload["id"].as<String>();
+    if (FleetScheduler::cancelOperation(id)) {
+        MqttManager::publishCommandResult("delete_schedule", "completed", 
+            "{\"msg\":\"Schedule deleted\"}", commandId);
+        FleetManager::publishSchedules();
+    } else {
+        MqttManager::publishCommandResult("delete_schedule", "failed", 
+            "{\"error\":\"Schedule not found\"}", commandId);
     }
 }
