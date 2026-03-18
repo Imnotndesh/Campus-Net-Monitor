@@ -14,10 +14,10 @@ def update_version_in_main(version):
         content = file.read()
     
     pattern1 = r'(Serial\.println\("\(--Campus Monitor Probe )v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9]+)?( --\)"\);?)'
-    replacement1 = f'Serial.println("(--Campus Monitor Probe {version} --)")'
+    replacement1 = f'Serial.println("(--Campus Monitor Probe {version} --)");'
     
     pattern2 = r'(ConfigManager::setFirmwareVersion\(")v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9]+)?("\);?)'
-    replacement2 = f'ConfigManager::setFirmwareVersion("{version}")'
+    replacement2 = f'ConfigManager::setFirmwareVersion("{version}");'
     
     changes_made = False
     
