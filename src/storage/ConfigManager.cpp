@@ -93,7 +93,6 @@ void ConfigManager::save(SystemConfig config) {
     prefs.putInt("report_interval", config.reportInterval);
 }
 
-// In ConfigManager.cpp
 bool ConfigManager::updateFromJSON(const String& json) {
     DynamicJsonDocument doc(1024);
     DeserializationError error = deserializeJson(doc, json);
@@ -109,7 +108,7 @@ bool ConfigManager::updateFromJSON(const String& json) {
         String ssid = wifi["ssid"].as<String>();
         String pass = wifi["password"].as<String>();
         if (ssid.length() == 0 || pass.length() == 0) {
-            return false; // reject empty strings
+            return false;
         }
         setWifi(ssid, pass);
     }
@@ -124,26 +123,18 @@ bool ConfigManager::updateFromJSON(const String& json) {
         String pass = mqtt["password"] | "";
         setMqtt(broker, port, user, pass);
     }
-
-    // --- Telemetry and command topics ---
     if (doc.containsKey("telemetry_topic")) {
         prefs.putString("telemetry_topic", doc["telemetry_topic"].as<String>());
     }
     if (doc.containsKey("cmd_topic")) {
         prefs.putString("cmd_topic", doc["cmd_topic"].as<String>());
     }
-
-    // --- Report interval ---
     if (doc.containsKey("report_interval")) {
         prefs.putInt("report_interval", doc["report_interval"].as<int>());
     }
-
-    // --- Fleet Location ---
     if (doc.containsKey("location")) {
         setFleetLocation(doc["location"].as<String>());
     }
-
-    // --- Fleet Groups (comma‑separated string) ---
     if (doc.containsKey("groups")) {
         String groups;
         if (doc["groups"].is<JsonArray>()) {
@@ -157,8 +148,6 @@ bool ConfigManager::updateFromJSON(const String& json) {
         }
         setFleetGroups(groups);
     }
-
-    // --- Fleet Tags (JSON object) ---
     if (doc.containsKey("tags")) {
         String tags;
         serializeJson(doc["tags"], tags);
@@ -170,7 +159,7 @@ bool ConfigManager::updateFromJSON(const String& json) {
 
 void ConfigManager::setFleetGroups(String groups) {
     Preferences fleetPrefs;
-    if (fleetPrefs.begin("fleet", false)) {  // false = read/write mode
+    if (fleetPrefs.begin("fleet", false)) { 
         fleetPrefs.putString("groups", groups);
         fleetPrefs.end();
     } else {
@@ -181,7 +170,7 @@ void ConfigManager::setFleetGroups(String groups) {
 String ConfigManager::getFleetGroups() {
     Preferences fleetPrefs;
     String groups = "";
-    if (fleetPrefs.begin("fleet", true)) {  // true = read-only mode
+    if (fleetPrefs.begin("fleet", true)) {
         groups = fleetPrefs.getString("groups", "");
         fleetPrefs.end();
     }

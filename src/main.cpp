@@ -1,4 +1,3 @@
-// main.cpp - Clean and modular with fleet support
 #include <Arduino.h>
 #include "storage/StorageManager.h"
 #include "storage/ConfigManager.h"
@@ -60,16 +59,16 @@ void setupSystem() {
     Serial.begin(115200);
     delay(1000);
     
-    Serial.println("\n╔════════════════════════════════════════╗");
-    Serial.println("║   Campus Monitor Probe v1.0.0          ║");
-    Serial.println("║   Network Diagnostic System            ║");
-    Serial.println("╚════════════════════════════════════════╝\n");
+    Serial.println("(--Campus Monitor Probe v0.0.1--)");
     
     StatusLED::begin(LED_PIN);
     ButtonManager::begin(BOOT_PIN);
     
     StorageManager::begin();
     ConfigManager::begin();
+    // Workaround to set version
+    ConfigManager::setFirmwareVersion("v0.0.1");
+    ConfigManager::setMaintenanceWindow("02:00-02:05");
     CommandHandler::begin();
     
     xTaskCreatePinnedToCore(uiTask, "uiTask", 2048, NULL, 1, NULL, 0);

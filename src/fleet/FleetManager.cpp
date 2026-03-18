@@ -410,7 +410,7 @@ void FleetManager::reportFleetStatus() {
     DynamicJsonDocument doc(1024);
     
     doc["probe_id"] = ConfigManager::getProbeId();
-    doc["firmware"] = ConfigManager::getFirmwareVersion();
+    doc["fw_version"] = ConfigManager::getFirmwareVersion();
     doc["uptime"] = millis() / 1000;
     doc["timestamp"] = TimeManager::getTimestamp();
     doc["epoch"] = TimeManager::getEpoch();
