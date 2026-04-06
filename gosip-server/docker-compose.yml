@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  gosip-server:
+    build: .
+    container_name: gosip-server
+    ports:
+      - "5060:5060/udp"    # SIP signalling – UDP (softphones use this)
+      - "5060:5060/tcp"    # SIP signalling – TCP (optional)
+      - "8080:8080/tcp"    # HTTP status API
+    environment:
+      SIP_HOST: "0.0.0.0"
+      SIP_PORT: "5060"
+      HTTP_PORT: "8080"
+    restart: unless-stopped
